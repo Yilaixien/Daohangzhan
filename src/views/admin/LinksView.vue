@@ -149,6 +149,57 @@
         </div>
       </div>
     </div>
+
+    <!-- 死链检测结果弹窗 -->
+    <div v-if="showCheckResult" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="showCheckResult = false">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-800">死链检测结果</h3>
+            <p class="text-sm text-gray-500 mt-1">共 {{ checkResults.length }} 个链接，<span :class="deadCount > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'">{{ deadCount }}</span> 个可能失效</p>
+          </div>
+          <button @click="showCheckResult = false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b sticky top-0">
+              <tr>
+                <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">名称</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">URL</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">状态</th>
+                <th class="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr v-for="entry in checkResults" :key="entry.link.id" class="hover:bg-gray-50 transition-colors">
+                <td class="px-4 py-3 text-gray-700 font-medium">{{ entry.link.title }}</td>
+                <td class="px-4 py-3 hidden sm:table-cell">
+                  <a :href="entry.link.url" target="_blank" class="text-blue-600 hover:underline truncate max-w-[220px] block">{{ entry.link.url }}</a>
+                </td>
+                <td class="px-4 py-3">
+                  <span v-if="entry.status === 0" class="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded">无法访问</span>
+                  <span v-else-if="entry.status >= 400" class="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded">失效({{ entry.status }})</span>
+                  <span v-else class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded">存活({{ entry.status }})</span>
+                </td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">
+                  <template v-if="isDeadStatus(entry.status)">
+                    <button @click="hideDeadLink(entry)" :disabled="checkSaving" class="px-2 py-1 text-xs text-amber-700 bg-amber-100 hover:bg-amber-200 rounded disabled:opacity-50">隐藏</button>
+                    <button @click="confirmDelete(entry.link)" :disabled="checkSaving" class="ml-2 px-2 py-1 text-xs text-red-700 bg-red-100 hover:bg-red-200 rounded disabled:opacity-50">删除</button>
+                  </template>
+                  <span v-else class="text-xs text-gray-400">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50">
+          <button v-if="deadCount > 0" @click="hideAllDead" :disabled="checkSaving" class="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
+            {{ checkSaving ? '处理中...' : '一键隐藏全部失效' }}
+          </button>
+          <button @click="showCheckResult = false" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -173,6 +224,11 @@ const showDeleteConfirm = ref(false)
 const editingLink = ref<Link | null>(null)
 const deleteTarget = ref<Link | null>(null)
 const batchText = ref('')
+
+// 死链检测结果弹窗
+const showCheckResult = ref(false)
+const checkSaving = ref(false)
+const checkResults = ref<{ link: Link; status: number }[]>([])
 
 const form = ref({
   title: '',
@@ -278,9 +334,11 @@ function confirmDelete(link: Link) {
 
 async function doDelete() {
   if (!deleteTarget.value) return
+  const targetId = String(deleteTarget.value.id)
   await services.links.remove(deleteTarget.value.id)
   showDeleteConfirm.value = false
   deleteTarget.value = null
+  checkResults.value = checkResults.value.filter(e => String(e.link.id) !== targetId)
   await loadData()
 }
 
@@ -306,14 +364,46 @@ async function handleBatchAdd() {
   await loadData()
 }
 
+function isDeadStatus(status: number): boolean {
+  return status === 0 || status >= 400
+}
+
+const deadCount = computed(() => checkResults.value.filter(e => isDeadStatus(e.status)).length)
+
 async function checkDeadLinks() {
   checking.value = true
   try {
     const results = await services.links.checkDeadLinks()
-    const deadCount = results.filter(r => r.status === 0 || r.status >= 400).length
-    alert(`检测完成：共 ${results.length} 个链接，${deadCount} 个可能失效`)
+    const statusByLink = new Map(results.map(r => [String(r.id), r.status]))
+    checkResults.value = links.value
+      .filter(l => statusByLink.has(String(l.id)))
+      .map(l => ({ link: l, status: statusByLink.get(String(l.id))! }))
+    showCheckResult.value = true
   } catch {} finally {
     checking.value = false
+  }
+}
+
+async function hideDeadLink(entry: { link: Link; status: number }) {
+  checkSaving.value = true
+  try {
+    await services.links.update(entry.link.id, { is_visible: false })
+    checkResults.value = checkResults.value.filter(e => String(e.link.id) !== String(entry.link.id))
+    await loadData()
+  } catch {} finally {
+    checkSaving.value = false
+  }
+}
+
+async function hideAllDead() {
+  checkSaving.value = true
+  const dead = checkResults.value.filter(e => isDeadStatus(e.status))
+  try {
+    await Promise.all(dead.map(e => services.links.update(e.link.id, { is_visible: false }).catch(() => {})))
+    checkResults.value = checkResults.value.filter(e => !isDeadStatus(e.status))
+    await loadData()
+  } finally {
+    checkSaving.value = false
   }
 }
 

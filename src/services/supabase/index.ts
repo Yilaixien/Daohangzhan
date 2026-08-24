@@ -14,6 +14,47 @@ function getHeaders(): Record<string, string> {
   return {}
 }
 
+// 死链检测参数
+const DETECT_TIMEOUT = 5000 // 单链接超时（毫秒）
+const DETECT_CONCURRENCY = 5 // 同时检测的链接数
+
+// no-cors 下无法读取真实 HTTP 状态码，以「请求是否成功建立」判定可达性：可达记 200，失败（超时/网络错误）记 0
+async function detectUrlReachable(url: string, timeoutMs: number): Promise<number> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      mode: 'no-cors',
+      cache: 'no-store',
+    })
+    return 200
+  } catch {
+    return 0
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 并发执行器：按 limit 分片，控制同时在途的 worker 数量
+async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<{ id: number | string; status: number }>) {
+  const results: { id: number | string; status: number }[] = []
+  let index = 0
+  async function runner() {
+    while (index < items.length) {
+      const current = index++
+      results[current] = await worker(items[current])
+    }
+  }
+  const runners = []
+  for (let i = 0; i < Math.min(limit, items.length); i++) {
+    runners.push(runner())
+  }
+  await Promise.all(runners)
+  return results
+}
+
 export function createServices(): Services {
   return {
     links: {
@@ -104,23 +145,10 @@ export function createServices(): Services {
           .select('id, url')
           .eq('is_visible', true)
         if (!links) return []
-        const results: { id: number | string; status: number }[] = []
-        for (const link of links) {
-          try {
-            const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
-            const resp = await fetch(link.url, {
-              method: 'HEAD',
-              signal: controller.signal,
-              mode: 'no-cors',
-            })
-            clearTimeout(timeout)
-            results.push({ id: link.id, status: resp.status })
-          } catch {
-            results.push({ id: link.id, status: 0 })
-          }
-        }
-        return results
+        return runWithConcurrency(links, DETECT_CONCURRENCY, async (link) => ({
+          id: link.id,
+          status: await detectUrlReachable(link.url, DETECT_TIMEOUT),
+        }))
       },
     },
 

@@ -3,6 +3,71 @@ const auth = require('../middleware/auth');
 
 const router = express.Router();
 
+// 死链检测参数
+const DEAD_URL_TIMEOUT = 5000; // 单链接超时（毫秒）
+const DETECT_CONCURRENCY = 5;  // 同时检测的链接数
+
+// 单链接检测：优先 HEAD，被拒/异常时回退 GET（Request Range 只取少量数据），返回 HTTP 状态码，不可达返回 0
+async function detectUrl(url, timeoutMs) {
+  let controller = new AbortController();
+  const withTimeout = (ms) => {
+    controller.abort();
+    controller = new AbortController();
+    return setTimeout(() => controller.abort(), ms);
+  };
+
+  // 1) HEAD
+  let timer = withTimeout(timeoutMs);
+  try {
+    const resp = await fetch(url, { method: 'HEAD', signal: controller.signal, redirect: 'follow' });
+    clearTimeout(timer);
+    if (resp.status >= 400 || resp.status === 405 || resp.status === 403) {
+      // 视为该方式被拒，回退 GET
+    } else {
+      return resp.status;
+    }
+  } catch {
+    // 超时或网络异常，回退 GET
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // 2) 回退 GET
+  timer = withTimeout(timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    clearTimeout(timer);
+    return resp.status;
+  } catch {
+    return 0; // 不可达，判为死链
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 并发执行器：按 limit 分片，控制同时在途的 worker 数量
+async function runWithConcurrency(items, limit, worker) {
+  const results = [];
+  let index = 0;
+  async function runner() {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await worker(items[current]);
+    }
+  }
+  const runners = [];
+  for (let i = 0; i < Math.min(limit, items.length); i++) {
+    runners.push(runner());
+  }
+  await Promise.all(runners);
+  return results;
+}
+
 // GET /api/links — 获取链接列表（公开）
 router.get('/', async (req, res) => {
   try {
@@ -118,22 +183,11 @@ router.get('/check-dead', auth, async (req, res) => {
   try {
     const pool = req.app.get('pool');
     const [links] = await pool.query("SELECT `id`, `url` FROM `links` WHERE `is_visible` = 1");
-    const results = [];
 
-    for (const link of links) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        const resp = await fetch(link.url, {
-          method: 'HEAD',
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        results.push({ id: link.id, status: resp.status });
-      } catch {
-        results.push({ id: link.id, status: 0 });
-      }
-    }
+    const results = await runWithConcurrency(links, DETECT_CONCURRENCY, async (link) => ({
+      id: link.id,
+      status: await detectUrl(link.url, DEAD_URL_TIMEOUT),
+    }));
 
     res.json(results);
   } catch (err) {
