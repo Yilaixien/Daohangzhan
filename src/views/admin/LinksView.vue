@@ -88,12 +88,18 @@
         <h3 class="text-lg font-semibold text-gray-800 mb-4">{{ editingLink ? '编辑链接' : '添加链接' }}</h3>
         <form @submit.prevent="saveLink" class="space-y-3">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">名称 *</label>
-            <input v-model="form.title" type="text" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <label class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
+            <div class="flex gap-2">
+              <input v-model="form.url" type="url" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" @blur="autoFetch()" />
+              <button type="button" @click="autoFetch(true)" :disabled="fetching" class="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors whitespace-nowrap">
+                {{ fetching ? '获取中...' : '自动获取' }}
+              </button>
+            </div>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
-            <input v-model="form.url" type="url" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <label class="block text-sm font-medium text-gray-700 mb-1">名称 *</label>
+            <input v-model="form.title" type="text" required placeholder="输入链接后自动获取" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <p v-if="fetching" class="text-xs text-gray-400 mt-1">正在获取名称...</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">分组 *</label>
@@ -224,6 +230,7 @@ const showDeleteConfirm = ref(false)
 const editingLink = ref<Link | null>(null)
 const deleteTarget = ref<Link | null>(null)
 const batchText = ref('')
+const fetching = ref(false) // 添加链接时自动获取名称/图标中
 
 // 死链检测结果弹窗
 const showCheckResult = ref(false)
@@ -296,6 +303,42 @@ function openEdit(link: Link) {
     sort_order: link.sort_order,
   }
   showForm.value = true
+}
+
+// 输入链接后自动获取名称与图标（仅添加模式生效；force 为 true 时强制覆盖已填名称）
+async function autoFetch(force = false) {
+  if (editingLink.value || fetching.value) return
+  let raw = form.value.url.trim()
+  if (!raw) return
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    raw = 'https://' + raw
+    form.value.url = raw
+  }
+  let hostname = ''
+  try {
+    hostname = new URL(raw).hostname
+  } catch {
+    return // URL 非法时静默放弃
+  }
+
+  // 1. 立即填充图标 URL（纯前端拼串，无需网络检查）
+  form.value.icon = `https://a.favicon.im/${hostname}`
+
+  fetching.value = true
+  try {
+    // 2. 请求标题 API 获取名称
+    const resp = await fetch(`https://lianjie.hjke.cn/api/title?url=${encodeURIComponent(raw)}`)
+    if (!resp.ok) throw new Error('request failed')
+    const json = await resp.json()
+    const name = json?.data?.title as string | undefined
+    if (name && (!form.value.title || force)) {
+      form.value.title = name.trim()
+    }
+  } catch {
+    // 获取失败静默处理：名称留空由用户手填，不影响保存
+  } finally {
+    fetching.value = false
+  }
 }
 
 async function saveLink() {
