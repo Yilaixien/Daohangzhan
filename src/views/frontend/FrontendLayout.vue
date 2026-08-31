@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex flex-col relative">
+  <div class="glass-page min-h-screen flex flex-col relative">
     <!-- 全局玻璃氛围背景（渐变兜底 / 背景图） -->
     <BackgroundImage :bg-url="bgUrl" />
 
