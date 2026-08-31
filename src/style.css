@@ -64,13 +64,14 @@ body {
 }
 
 /* ============ 玻璃工具类 ============ */
+/* 注：backdrop-filter 统一只写标准属性，构建时由 Lightning CSS 自动补 -webkit- 前缀 */
+
 .glass {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .glass-card {
@@ -79,7 +80,6 @@ body {
   border-radius: 14px;
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 
@@ -89,13 +89,12 @@ body {
   box-shadow: var(--glass-shadow);
 }
 
-/* 吸顶条 / 强玻璃 */
+/* 强玻璃 */
 .glass-strong {
   background: var(--glass-bg-strong);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 /* 底部页脚横条 */
@@ -103,7 +102,6 @@ body {
   background: var(--glass-bg);
   border-top: 1px solid var(--glass-border);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 /* 引擎选择按钮（等宽边框，选中高亮，文字垂直居中） */
@@ -116,18 +114,21 @@ body {
   padding: 0 14px;
   font-size: 13px;
   color: var(--glass-text-soft);
-  background: var(--glass-bg);
-  border: 1px solid transparent;
+  /* 默认磨砂态 */
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
   cursor: pointer;
   transition: all 0.25s ease;
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(30px);
 }
 
 .glass-chip:hover {
-  background: var(--glass-hover);
+  /* hover 恢复为白色玻璃样式 */
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border);
   color: var(--glass-text);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 .glass-chip.active,
@@ -142,6 +143,30 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 3px;
+}
+
+/* 按钮统一磨砂态（鼠标移上之前）+ 悬停回白色玻璃 */
+.btn-glass {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(30px);
+  transition: background 0.25s ease, border-color 0.25s ease,
+    backdrop-filter 0.25s ease;
+}
+
+.btn-glass:hover {
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* 搜索框：背景白 25%，同套磨砂处理 */
+.search-glass {
+  background: rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(30px);
 }
 
 /* 搜索输入 */

@@ -133,15 +133,10 @@ onUnmounted(() => {
   padding: 12px 16px;
   transform: translateZ(0); /* GPU 合成层，稳定 backdrop-filter */
   will-change: transform;
-  transition: background-color 0.35s ease, border-color 0.35s ease,
-    box-shadow 0.35s ease, opacity 0.35s ease;
 }
 
-/* 吸顶态：变通栏（瞬时切换，避免逐帧布局动画），底部 border 作为分隔线 */
+/* 吸顶态：仅变通栏（瞬时切换），无背景/分隔线/投影，只留搜索胶囊悬浮 */
 .search-shell.stuck {
   max-width: none;
-  background: var(--glass-bg-strong);
-  border-bottom: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
 }
 </style>

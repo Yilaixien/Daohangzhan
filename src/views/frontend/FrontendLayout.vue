@@ -18,7 +18,7 @@
             v-for="item in navItems"
             :key="item.path"
             :to="item.path"
-            class="pill-link glass-link px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm"
+            class="btn-glass pill-link glass-link px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm"
           >
             {{ item.label }}
           </router-link>
@@ -98,9 +98,5 @@ onUnmounted(() => {
 .pill-link {
   border-radius: 9999px;
   transition: background 0.2s ease;
-}
-
-.pill-link:hover {
-  background: var(--glass-hover);
 }
 </style>

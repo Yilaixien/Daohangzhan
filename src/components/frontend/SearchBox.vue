@@ -5,7 +5,7 @@
   >
     <!-- 搜索行 -->
     <div
-      class="glass flex items-center rounded-full overflow-hidden"
+      class="search-glass flex items-center rounded-full overflow-hidden"
       :class="stuck ? 'h-12' : 'h-12 sm:h-14'"
     >
       <div class="pl-5 flex-shrink-0 glass-text-faint">
@@ -27,8 +27,7 @@
       />
       <button
         @click="search"
-        class="h-full px-6 text-sm transition-opacity hover:opacity-85"
-        style="background: var(--glass-bg-strong); border-left: 1px solid var(--glass-border)"
+        class="btn-glass h-full px-6 text-sm"
       >
         搜索
       </button>
