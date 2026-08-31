@@ -75,6 +75,7 @@ const menuItems = [
   { path: '/admin/apply', label: '收录审核', icon: '✅' },
   { path: '/admin/search-engines', label: '搜索引擎', icon: '🔍' },
   { path: '/admin/config', label: '站点配置', icon: '⚙️' },
+  { path: '/admin/theme', label: '主题管理', icon: '🎨' },
 ]
 
 function isActive(path: string): boolean {

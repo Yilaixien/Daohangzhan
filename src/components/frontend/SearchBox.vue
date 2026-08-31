@@ -1,7 +1,7 @@
 <template>
   <div
-    class="search-inner mx-auto whitespace-nowrap"
-    :class="stuck ? 'max-w-3xl pr-20' : 'max-w-2xl'"
+    class="search-inner mx-auto max-w-3xl whitespace-nowrap"
+    :class="stuck ? 'pr-20' : ''"
   >
     <!-- 搜索行 -->
     <div

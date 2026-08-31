@@ -21,12 +21,14 @@
         @change-engine="store.setCurrentEngine"
       />
       <!-- 吸顶小时间：时间不消失，始终可见 -->
-      <span
-        v-if="scrolled"
-        class="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 glass-text font-semibold text-sm tracking-[0.25em] tabular-nums"
-      >
-        {{ timeStr }}
-      </span>
+      <Transition name="fade">
+        <span
+          v-if="scrolled"
+          class="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 glass-text font-semibold text-sm tracking-[0.25em] tabular-nums"
+        >
+          {{ timeStr }}
+        </span>
+      </Transition>
     </div>
 
     <!-- 下方内容区 -->
@@ -132,11 +134,24 @@ onUnmounted(() => {
   margin: 0 auto;
   padding: 12px 16px;
   transform: translateZ(0); /* GPU 合成层，稳定 backdrop-filter */
-  will-change: transform;
+  will-change: transform, max-width;
+  transition: max-width 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
 }
 
-/* 吸顶态：仅变通栏（瞬时切换），无背景/分隔线/投影，只留搜索胶囊悬浮 */
+/* 吸顶态：变通栏（平滑过渡），无背景/分隔线/投影，只留搜索胶囊悬浮 */
 .search-shell.stuck {
   max-width: none;
+}
+
+/* 吸顶小时间淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

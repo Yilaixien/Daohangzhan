@@ -65,6 +65,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/SearchEnginesView.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'theme',
+        name: 'admin-theme',
+        component: () => import('@/views/admin/ThemeManageView.vue'),
+        meta: { requiresAuth: true },
+      },
     ],
   },
   {
