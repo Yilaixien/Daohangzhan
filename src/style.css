@@ -48,11 +48,11 @@
 /* 注：管理端与前台共用 body，全局样式保持中性（与 main 分支一致），
    玻璃主题（白字 + 渐变兜底）通过 .glass-page 作用域仅作用于前台 */
 
-/* 前台页面作用域（仅 FrontendLayout 使用）：提供白字 + 渐变底色兜底 */
+/* 前台页面作用域（仅 FrontendLayout 使用）：仅提供白字与作用域选中态。
+   渐变与背景图由 BackgroundImage（-z-10）层负责，此处不再铺不透明背景，
+   否则会按绘制顺序盖住 -z-10 背景层，导致配置的背景图不显示 */
 .glass-page {
   color: var(--glass-text);
-  background: linear-gradient(160deg, var(--page-bg-1), var(--page-bg-2) 48%, var(--page-bg-3));
-  background-attachment: fixed;
 }
 
 .glass-page ::selection {
