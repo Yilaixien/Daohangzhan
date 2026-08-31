@@ -18,9 +18,6 @@
   --glass-text-soft: rgba(255, 255, 255, 0.78);
   --glass-text-faint: rgba(255, 255, 255, 0.55);
 
-  /* 隐形阻挡层 */
-  --glass-shield: rgba(23, 27, 70, 0.5);
-
   /* 页面渐变兜底背景（浅色：深邃蓝紫极光） */
   --page-bg-1: #1e2a78;
   --page-bg-2: #35247f;
@@ -40,8 +37,6 @@
   --glass-text: #ffffff;
   --glass-text-soft: rgba(255, 255, 255, 0.78);
   --glass-text-faint: rgba(255, 255, 255, 0.5);
-
-  --glass-shield: rgba(4, 6, 18, 0.55);
 
   /* 页面渐变兜底背景（深色：近黑深蓝） */
   --page-bg-1: #050816;

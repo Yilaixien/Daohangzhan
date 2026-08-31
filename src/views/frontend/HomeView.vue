@@ -1,7 +1,7 @@
 <template>
   <FrontendLayout>
-    <!-- 首屏：留白 + 主次层级，标语已移除 -->
-    <section class="relative flex flex-col items-center justify-center px-4 sm:px-6 min-h-screen">
+    <!-- 首屏顶部留白区（日期时间 + 顶部留白，链接无需滚动即可见） -->
+    <section class="relative px-4 sm:px-6 pt-28 sm:pt-32 pb-4">
       <!-- 右上日期时间（向下滚动后整体淡出，日期随之消失） -->
       <div
         class="fixed top-5 right-5 sm:right-7 z-40 transition-all duration-500 select-none pointer-events-none"
@@ -9,31 +9,28 @@
       >
         <DateTimeDisplay />
       </div>
-
-      <!-- 隐形阻挡层：吸顶时防止下方图标穿透到导航条背景 -->
-      <div v-if="scrolled" class="sticky-shield"></div>
-
-      <!-- 搜索区（吸顶 shell） -->
-      <div class="search-shell w-full transition-all duration-500" :class="{ stuck: scrolled }">
-        <SearchBox
-          :engines="store.searchEngines"
-          :engine="store.currentEngine"
-          :stuck="scrolled"
-          @search="store.doSearch"
-          @change-engine="store.setCurrentEngine"
-        />
-        <!-- 吸顶小时间：时间不消失，始终可见 -->
-        <span
-          v-if="scrolled"
-          class="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 glass-text font-semibold text-sm tracking-[0.25em] tabular-nums"
-        >
-          {{ timeStr }}
-        </span>
-      </div>
     </section>
 
+    <!-- 搜索区（sticky 吸顶：不脱离文档流、无布局跳变） -->
+    <div ref="shellRef" class="search-shell w-full" :class="{ stuck: scrolled }">
+      <SearchBox
+        :engines="store.searchEngines"
+        :engine="store.currentEngine"
+        :stuck="scrolled"
+        @search="store.doSearch"
+        @change-engine="store.setCurrentEngine"
+      />
+      <!-- 吸顶小时间：时间不消失，始终可见 -->
+      <span
+        v-if="scrolled"
+        class="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 glass-text font-semibold text-sm tracking-[0.25em] tabular-nums"
+      >
+        {{ timeStr }}
+      </span>
+    </div>
+
     <!-- 下方内容区 -->
-    <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+    <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-16">
       <!-- 加载状态 -->
       <div v-if="store.loading" class="space-y-8">
         <div v-for="i in 3" :key="i" class="animate-pulse">
@@ -101,10 +98,18 @@ import BackToTop from '@/components/frontend/BackToTop.vue'
 const store = useHomeStore()
 const { timeStr } = useDateTime()
 
+const shellRef = ref<HTMLElement | null>(null)
 const scrolled = ref(false)
 
+let ticking = false
 function handleScroll() {
-  scrolled.value = window.scrollY > 60
+  if (ticking) return
+  ticking = true
+  requestAnimationFrame(() => {
+    ticking = false
+    // 以搜索条自身位置判定吸顶：恰好在触顶瞬间切换，无瞬移
+    scrolled.value = (shellRef.value?.getBoundingClientRect().top ?? 0) <= 0
+  })
 }
 
 onMounted(() => {
@@ -118,43 +123,25 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 搜索区外壳：普通态居中，吸顶态变为顶部通栏玻璃条 */
+/* 搜索区外壳：position: sticky，不脱离文档流、无布局跳变 */
 .search-shell {
-  position: relative;
-  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 12px 16px;
+  transform: translateZ(0); /* GPU 合成层，稳定 backdrop-filter */
+  will-change: transform;
+  transition: background-color 0.35s ease, border-color 0.35s ease,
+    box-shadow 0.35s ease, opacity 0.35s ease;
 }
 
+/* 吸顶态：变通栏（瞬时切换，避免逐帧布局动画），底部 border 作为分隔线 */
 .search-shell.stuck {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 40;
-  padding: 10px 16px;
+  max-width: none;
   background: var(--glass-bg-strong);
   border-bottom: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
-/* 隐形阻挡层：吸顶条下方，防止图标滚动穿透显示 */
-.sticky-shield {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 72px;
-  z-index: 30;
-  pointer-events: none;
-  background: linear-gradient(180deg, var(--glass-shield) 0%, transparent 100%);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
-/* 保证过渡流畅 */
-.search-shell,
-.sticky-shield {
-  will-change: transform, opacity;
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="search-inner mx-auto transition-all duration-500 whitespace-nowrap"
+    class="search-inner mx-auto whitespace-nowrap"
     :class="stuck ? 'max-w-3xl pr-20' : 'max-w-2xl'"
   >
     <!-- 搜索行 -->
