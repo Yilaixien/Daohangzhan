@@ -44,6 +44,13 @@
             <input v-model="config.background" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">前台主题</label>
+            <select v-model="config.theme" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="light">毛玻璃浅色（默认）</option>
+              <option value="dark">毛玻璃深色</option>
+            </select>
+          </div>
+          <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">ICP备案号</label>
             <input v-model="config.icp" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="京ICP备XXXXXXXX号" />
           </div>
@@ -115,6 +122,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { services } from '@/services'
+import { useThemeStore } from '@/stores/theme'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -132,6 +140,7 @@ const config = reactive<Record<string, string>>({
   apply: '1',
   apply_gg: '',
   about_content: '',
+  theme: 'light',
   admin_user: 'admin',
   admin_pwd: '',
   template: 'default',
@@ -159,6 +168,8 @@ async function saveAll() {
       await services.config.set(key, config[key])
     }
     savedMsg.value = '配置已保存'
+    // 主题保存后即时生效，便于管理员预览前台效果
+    useThemeStore().apply(config.theme === 'dark' ? 'dark' : 'light')
     setTimeout(() => { savedMsg.value = '' }, 2000)
   } catch {} finally {
     saving.value = false

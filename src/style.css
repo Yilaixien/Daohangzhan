@@ -1,1 +1,185 @@
 @import "tailwindcss";
+
+/* ============ 毛玻璃主题变量体系 ============ */
+:root,
+[data-theme='light'] {
+  /* 玻璃基础 */
+  --glass-bg: rgba(255, 255, 255, 0.12);
+  --glass-bg-strong: rgba(255, 255, 255, 0.22);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --glass-hover: rgba(255, 255, 255, 0.18);
+  --glass-selected: rgba(255, 255, 255, 0.32);
+
+  /* 文字 */
+  --glass-text: #ffffff;
+  --glass-text-soft: rgba(255, 255, 255, 0.78);
+  --glass-text-faint: rgba(255, 255, 255, 0.55);
+
+  /* 隐形阻挡层 */
+  --glass-shield: rgba(23, 27, 70, 0.5);
+
+  /* 页面渐变兜底背景（浅色：深邃蓝紫极光） */
+  --page-bg-1: #1e2a78;
+  --page-bg-2: #35247f;
+  --page-bg-3: #5b2a9d;
+}
+
+[data-theme='dark'] {
+  --glass-bg: rgba(8, 12, 32, 0.42);
+  --glass-bg-strong: rgba(8, 12, 32, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --glass-hover: rgba(255, 255, 255, 0.1);
+  --glass-selected: rgba(255, 255, 255, 0.18);
+
+  --glass-text: #ffffff;
+  --glass-text-soft: rgba(255, 255, 255, 0.78);
+  --glass-text-faint: rgba(255, 255, 255, 0.5);
+
+  --glass-shield: rgba(4, 6, 18, 0.55);
+
+  /* 页面渐变兜底背景（深色：近黑深蓝） */
+  --page-bg-1: #050816;
+  --page-bg-2: #0a1030;
+  --page-bg-3: #131031;
+}
+
+/* ============ 全局基础 ============ */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--glass-text);
+  background: linear-gradient(160deg, var(--page-bg-1), var(--page-bg-2) 48%, var(--page-bg-3));
+  background-attachment: fixed;
+  transition: background 0.5s ease;
+}
+
+::selection {
+  background: var(--glass-selected);
+  color: var(--glass-text);
+}
+
+/* ============ 玻璃工具类 ============ */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.glass-card:hover {
+  background: var(--glass-hover);
+  transform: scale(1.04);
+  box-shadow: var(--glass-shadow);
+}
+
+/* 吸顶条 / 强玻璃 */
+.glass-strong {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* 底部页脚横条 */
+.glass-strip {
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* 引擎选择按钮（等宽边框，选中高亮，文字垂直居中） */
+.glass-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  color: var(--glass-text-soft);
+  background: var(--glass-bg);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.glass-chip:hover {
+  background: var(--glass-hover);
+  color: var(--glass-text);
+}
+
+.glass-chip.active,
+.glass-chip[data-active='true'] {
+  color: var(--glass-text);
+  background: var(--glass-selected);
+  border-color: var(--glass-border);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset, var(--glass-shadow);
+}
+
+.glass-chip img {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+/* 搜索输入 */
+.glass-input {
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--glass-text);
+}
+
+.glass-input::placeholder {
+  color: var(--glass-text-soft);
+}
+
+/* 玻璃文字 */
+.glass-text {
+  color: var(--glass-text);
+}
+
+.glass-text-soft {
+  color: var(--glass-text-soft);
+}
+
+.glass-text-faint {
+  color: var(--glass-text-faint);
+}
+
+/* 链接 hover */
+.glass-link {
+  color: var(--glass-text-soft);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.glass-link:hover {
+  color: var(--glass-text);
+}

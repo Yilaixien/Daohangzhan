@@ -3,7 +3,7 @@
     :href="link.url"
     target="_blank"
     rel="noopener"
-    class="flex flex-col items-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md hover:scale-105 transition-all duration-200 group"
+    class="glass-card flex flex-col items-center p-4 group"
     @click="$emit('click', link)"
   >
     <!-- 图标区域 -->
@@ -22,21 +22,22 @@
       ></div>
       <div
         v-else
-        class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold"
+        class="w-8 h-8 rounded-lg text-sm font-bold glass-text"
+        style="background: var(--glass-bg-strong); border: 1px solid var(--glass-border)"
       >
         {{ link.title.charAt(0) }}
       </div>
     </div>
 
     <!-- 标题 -->
-    <span class="text-xs text-gray-700 text-center leading-tight line-clamp-1">
+    <span class="text-xs glass-text text-center leading-tight line-clamp-1">
       {{ link.title }}
     </span>
 
     <!-- 描述 -->
     <span
       v-if="link.description"
-      class="text-xs text-gray-400 text-center mt-1 line-clamp-1"
+      class="text-xs glass-text-faint text-center mt-1 line-clamp-1"
     >
       {{ link.description }}
     </span>

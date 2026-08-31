@@ -1,15 +1,15 @@
 <template>
   <FrontendLayout>
     <div class="max-w-lg mx-auto px-4 py-8">
-      <div class="bg-white/80 backdrop-blur-sm rounded-lg shadow-sm p-6 sm:p-8">
-        <h2 class="text-xl font-bold text-gray-800 mb-6 text-center">申请收录</h2>
+      <div class="glass p-6 sm:p-8">
+        <h2 class="text-xl font-bold glass-text mb-6 text-center">申请收录</h2>
 
         <!-- 收录已关闭 -->
         <div v-if="applyStatus === 2" class="text-center py-8">
           <div class="text-4xl mb-3">🔒</div>
-          <p class="text-lg text-gray-500">网站已关闭收录</p>
-          <p class="text-sm text-gray-400 mt-2">感谢您的关注</p>
-          <router-link to="/" class="inline-block mt-4 text-blue-600 hover:text-blue-700 text-sm">
+          <p class="text-lg glass-text-soft">网站已关闭收录</p>
+          <p class="text-sm glass-text-faint mt-2">感谢您的关注</p>
+          <router-link to="/" class="inline-block mt-4 glass-link text-sm">
             返回首页
           </router-link>
         </div>

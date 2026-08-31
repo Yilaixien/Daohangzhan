@@ -1,40 +1,54 @@
 <template>
-  <div class="max-w-2xl mx-auto">
-    <!-- 搜索框 -->
-    <div class="flex items-center bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow">
-      <div class="pl-4 text-gray-400">
+  <div
+    class="search-inner mx-auto transition-all duration-500 whitespace-nowrap"
+    :class="stuck ? 'max-w-3xl pr-20' : 'max-w-2xl'"
+  >
+    <!-- 搜索行 -->
+    <div
+      class="glass flex items-center rounded-full overflow-hidden"
+      :class="stuck ? 'h-12' : 'h-12 sm:h-14'"
+    >
+      <div class="pl-5 flex-shrink-0 glass-text-faint">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
         </svg>
       </div>
       <input
         v-model="keyword"
         type="text"
         :placeholder="`使用 ${engine.name} 搜索`"
-        class="flex-1 px-3 py-3 border-0 outline-none text-gray-700"
+        class="glass-input flex-1 px-3 h-full min-w-0"
         @keyup.enter="search"
       />
       <button
         @click="search"
-        class="px-6 py-3 bg-blue-600 text-white rounded-r-lg hover:bg-blue-700 transition-colors"
+        class="h-full px-6 text-sm transition-opacity hover:opacity-85"
+        style="background: var(--glass-bg-strong); border-left: 1px solid var(--glass-border)"
       >
         搜索
       </button>
     </div>
 
-    <!-- 搜索引擎切换 -->
-    <div class="flex justify-center flex-wrap gap-3 mt-4">
+    <!-- 搜索引擎选择按钮（吸顶时收起） -->
+    <div
+      class="flex justify-center flex-wrap gap-2.5 mt-4 overflow-hidden transition-all duration-500"
+      :class="stuck ? 'opacity-0 max-h-0 mt-0 pointer-events-none' : 'opacity-100 max-h-20'"
+    >
       <button
         v-for="e in engines"
         :key="e.id"
+        type="button"
+        class="glass-chip"
+        :class="{ 'active': engine.id === e.id }"
         @click="$emit('change-engine', e)"
-        class="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full transition-colors"
-        :class="engine.id === e.id
-          ? 'bg-blue-100 text-blue-700 font-medium'
-          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
       >
-        <img v-if="e.icon && isImageIcon(e.icon)" :src="e.icon" class="w-3.5 h-3.5 rounded" />
-        <span v-else-if="e.icon" v-html="e.icon" class="w-3.5 h-3.5"></span>
+        <img v-if="e.icon && isImageIcon(e.icon)" :src="e.icon" alt="" />
+        <span v-else-if="e.icon" v-html="e.icon"></span>
         {{ e.name }}
       </button>
     </div>
@@ -48,6 +62,8 @@ import type { SearchEngine } from '@/services/contracts'
 defineProps<{
   engines: SearchEngine[]
   engine: SearchEngine
+  /** 吸顶态：搜索框变宽变长，与导航条高度持平 */
+  stuck?: boolean
 }>()
 
 const emit = defineEmits<{
