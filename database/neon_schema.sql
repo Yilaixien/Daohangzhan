@@ -138,7 +138,8 @@ CREATE POLICY ad_all ON links      FOR ALL TO nav_admin USING (true) WITH CHECK 
 CREATE POLICY ad_all ON config     FOR ALL TO nav_admin USING (true) WITH CHECK (true);
 CREATE POLICY ad_all ON apply      FOR ALL TO nav_admin USING (true) WITH CHECK (true);
 CREATE POLICY ad_all ON search_engines FOR ALL TO nav_admin USING (true) WITH CHECK (true);
-CREATE POLICY ad_all ON click_stats FOR SELECT, INSERT TO nav_admin USING (true);
+CREATE POLICY ad_all_select ON click_stats FOR SELECT TO nav_admin USING (true);
+CREATE POLICY ad_all_insert ON click_stats FOR INSERT TO nav_admin WITH CHECK (true);
 
 -- ============================================
 -- GRANT（角色无表权限时靠 GRANT 放行）
