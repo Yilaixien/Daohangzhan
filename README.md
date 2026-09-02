@@ -1,6 +1,6 @@
 # 网址导航站
 
-基于 Vue 3 + Vite + TypeScript + Pinia 的纯前端 SPA 网址导航站，支持双后端策略（Supabase / 自建 REST API），构建产物为静态 HTML/CSS/JS，可直接部署到 EdgeOne Pages。
+基于 Vue 3 + Vite + TypeScript + Pinia 的纯前端 SPA 网址导航站。数据层采用「**前端直连 Neon (PostgreSQL) 公开读 + EdgeOne Functions 代理后台**」架构（默认模式 `neon`），并保留自建 REST API（Node.js + Express + MySQL）作为参考后端模式（`rest`）。构建产物为静态 HTML/CSS/JS，可直接部署到 EdgeOne Pages。
 
 ## 技术栈
 
@@ -14,8 +14,9 @@
 | CSS | Tailwind CSS 4 |
 | 图表 | Chart.js (动态 import) |
 | 拖拽 | vuedraggable (SortableJS) |
-| 后端 (Supabase) | Supabase JS SDK v2 |
-| 后端 (自建) | Node.js + Express + MySQL |
+| 数据层（前台直连） | `@neondatabase/serverless`（HTTP 驱动）+ PostgreSQL RLS 双角色（nav_read/nav_admin） |
+| 后台代理（EdgeOne Functions） | `jose`（HS256 JWT 签发/验签）+ `bcryptjs`（管理员密码校验） |
+| 参考后端（可选） | Node.js + Express + MySQL |
 
 ## 功能特性
 
@@ -26,7 +27,7 @@
 - 数据统计仪表盘（趋势图 + 热门链接）
 - 响应式设计（桌面端 + 移动端）
 - 背景图 + 毛玻璃效果 + 实时时钟 + 返回顶部
-- 双后端策略模式（构建时通过环境变量切换）
+- 数据层双通道：前台公开读写直连 Neon（RLS 强制行过滤），后台读写经 EdgeOne Functions 代理（nav_admin）；构建期经 `VITE_BACKEND=neon|rest` 切换
 
 ## 快速开始
 
@@ -41,26 +42,37 @@ npm install
 复制 `.env.example` 为 `.env`，根据后端模式填写配置：
 
 ```env
-# 后端模式：supabase | rest
-VITE_BACKEND=supabase
+# 后端模式：neon（默认） | rest
+VITE_BACKEND=neon
 
-# Supabase 配置（VITE_BACKEND=supabase 时使用）
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+# 浏览器直连 Neon HTTP /sql 的连接串（角色 nav_read，RLS 过滤公开数据；会内联进构建产物，安全边界=RLS）
+VITE_NEON_DATABASE_URL=postgresql://nav_read:xxx@ep-xxx.region.aws.neon.tech/neondb?sslmode=require
 
-# 自建 REST API 配置（VITE_BACKEND=rest 时使用）
-VITE_API_BASE_URL=https://your-api.example.com/api
+# EdgeOne Functions 代理基地址（含路由前缀，如 https://edge-function.example.com/api）
+VITE_API_BASE_URL=https://your-functions-domain/api
 ```
+
+> 注意：`nav_admin` 连接串与 `JWT_SECRET` 不写入 `.env`（不进入前端 bundle），仅配置在 EdgeOne Functions 服务端环境变量。
 
 ### 3. 初始化数据库
 
-**Supabase 模式：**
-在 Supabase SQL Editor 中执行 `database/supabase_schema.sql`。
+**Neon 模式（默认，推荐）：**
 
-**MySQL 模式：**
-在 MySQL 中执行 `database/mysql_schema.sql`，然后启动参考后端：
+1. 在 [Neon Console](https://console.neon.tech) 创建项目，并用 Neon CLI（`neonctl` / `npx neon@latest ...`）或控制台创建两个登录角色：`nav_read`（公开读 + apply/click_stats 插入）、`nav_admin`（全表权限）。
+2. 在 SQL Editor（以项目主角色）执行 `database/neon_schema.sql`（建表 + 种子 + RLS 策略 + GRANT）。
+3. 生成并写入管理员密码的 bcrypt 哈希（配置项 `config.admin_pwd`，仅函数代理内校验，对匿名不可见；密码要求 16 位以上强随机）：
 
 ```bash
+# 生成 bcrypt 哈希（将 <16位以上强随机密码> 替换为真实密码）
+node -e "console.log(require('bcryptjs').hashSync('<16位以上强随机密码>', 10))"
+# 在 Neon SQL Editor 执行：将上一步输出的 hash 写入 admin_pwd
+UPDATE config SET value='<上一步输出的hash>' WHERE key='admin_pwd';
+```
+
+**MySQL 参考模式（可选）：**
+
+```bash
+mysql < database/mysql_schema.sql
 cd backend-reference
 cp .env.example .env   # 编辑数据库连接信息
 npm install
@@ -85,16 +97,29 @@ npm run build
 
 ## 部署指南
 
-### EdgeOne Pages 部署
+### EdgeOne Pages 部署（前端）
 
 1. 构建项目：`npm run build`
 2. 将 `dist/` 目录上传到 EdgeOne Pages
-3. 配置要点：
+3. 配置要点（构建变量）：
    - 构建命令：`npm run build`
    - 输出目录：`dist`
    - **无需 SPA fallback 配置**（项目使用 Hash 路由，URL 中 `#` 后的路径由前端处理）
+   - 环境变量：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`、`VITE_API_BASE_URL`（VITE_* 会在构建期内联进 bundle；旧的 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 已废弃，删除）
 
-### 宝塔 Nginx + PM2 部署（自建 REST API 后端）
+### EdgeOne Functions 部署（后台代理，Neon 模式必需）
+
+代码位于 [edge-functions/](edge-functions/)（`@neondatabase/serverless` + `jose` + `bcryptjs`，单一函数入口）：
+
+1. 在 EdgeOne 边缘函数控制台创建函数并部署 `edge-functions/`（触发路径需与 `VITE_API_BASE_URL` 对应，如 `https://<函数域名>/api`）。
+2. 配置**服务端环境变量**（不进 bundle）：
+   - `DATABASE_URL_ADMIN`：nav_admin 连接串
+   - `JWT_SECRET`：HS256 密钥（≥32 字符随机串）
+3. 函数入口按 EdgeOne 事件契约做适配，逻辑层为标准 Web Request/Response（见文件头部注释）。
+
+安全边界：`nav_admin` 凭据与 JWT 密钥只存在于函数服务端环境变量；自签 JWT 对数据库层仅是会话状态标记（Postgres/RLS 不校验），对函数 API 是真实凭证（每次验签）。
+
+### 宝塔 Nginx + PM2 部署（参考 REST 后端，可选）
 
 **后端部署：**
 
@@ -138,18 +163,34 @@ server {
 }
 ```
 
-### Supabase → MySQL 迁移指南
+### Supabase → Neon 迁移指南（当前推荐路径）
 
-1. 在 Supabase 导出数据：`pg_dump` 或 Supabase Dashboard → Export
-2. 使用 `database/mysql_schema.sql` 在 MySQL 中创建表结构
-3. 数据类型映射：
-   - `UUID` → `VARCHAR(36)` 或 `INT UNSIGNED AUTO_INCREMENT`
-   - `TIMESTAMPTZ` → `DATETIME`
-   - `BOOLEAN` → `TINYINT(1)`
-   - `BIGSERIAL` → `BIGINT UNSIGNED AUTO_INCREMENT`
-4. 迁移种子数据（INSERT 语句已在两个文件中保持一致）
-5. 修改前端 `.env`：`VITE_BACKEND=rest`，配置 `VITE_API_BASE_URL`
-6. 重新构建前端：`npm run build`
+1. 在 Neon 创建项目，创建角色 `nav_read` / `nav_admin`（直连串，非 -pooler）。
+2. 在 SQL Editor 一次性执行 `database/neon_schema.sql`（表结构/种子沿用原 PostgreSQL，RLS 重写为按角色授权：`nav_read` 只读可见行且 `config` 排除 `admin_pwd`，`nav_admin` 全权含隐藏行）。
+3. 设置 `config.admin_pwd` 为 bcrypt 哈希（16 位以上强密码，成本因子 10~12）。
+4. 部署 EdgeOne Functions 代理并配置 `DATABASE_URL_ADMIN` / `JWT_SECRET`（见上节）。
+5. 修改前端环境变量：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`（nav_read）、`VITE_API_BASE_URL`（函数地址）。
+6. 重新构建前端：`npm run build`。
+
+> 历史路径：如需继续使用自建 REST (MySQL) 后端，执行 `database/mysql_schema.sql` 并按数据映射 `UUID→VARCHAR(36)`、`TIMESTAMPTZ→DATETIME`、`BOOLEAN→TINYINT(1)`、`BIGSERIAL→BIGINT UNSIGNED AUTO_INCREMENT` 迁移，前端 `VITE_BACKEND=rest` 配置 `VITE_API_BASE_URL`。（`database/supabase_schema.sql` 保留为迁移前历史参考，不再作为运行模式。）
+
+## EdgeOne Functions 代理路由（API 说明）
+
+统一返回体 `{ data }` / `{ message }`；除 `POST /auth/login` 外均需 `Authorization: Bearer <JWT>` 验签。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/auth/login` | 校验 `config.admin_user` / `admin_pwd`（bcrypt）→ 签发 HS256 JWT（7d） |
+| GET | `/links`、`/categories`、`/search-engines`、`/config`、`/config/:key` | 后台读（**含隐藏/停用行**，与前台直连的可见行语义不同，勿混用） |
+| GET | `/apply?status=` | 申请列表（可按状态过滤；不设匿名读） |
+| POST | `/links`、`/categories`、`/search-engines` | 新建（自动计算 sort_order） |
+| PUT | `/links/:id`、`/categories/:id`、`/search-engines/:id`、`/config/:key` | 更新（config 为 upsert） |
+| DELETE | `/links/:id`、`/categories/:id`、`/search-engines/:id` | 软删除（置 is_visible=false / is_active=false，后台仍可见） |
+| POST | `/links/reorder`、`/categories/reorder` | 批量排序（事务提交） |
+| POST | `/apply/:id/approve`、`/apply/:id/reject` | 审核通过（单条 CTE 原子：建链接+更新状态）/ 拒绝 |
+| GET | `/stats/overview`、`/stats/top-links?limit=`、`/stats/trend?days=` | 统计（总数/昨日今日/热门 Top N/趋势，缺失日补 0） |
+
+前台直连（nav_read，不经函数）的只读数据：首页分组/链接/搜索引擎/站点配置、收录申请提交、点击统计记录、死链检测所需的公开链接列表。
 
 ## 项目结构
 
@@ -167,16 +208,15 @@ server {
 │   ├── router/
 │   │   └── index.ts        # 路由配置 + 守卫
 │   ├── services/
-│   │   ├── contracts.ts    # 接口定义
-│   │   ├── index.ts        # 工厂函数（动态 import）
-│   │   ├── supabase/       # Supabase 实现
+│   │   ├── contracts.ts    # 接口定义（服务契约/API 边界）
+│   │   ├── index.ts        # 工厂函数（按 VITE_BACKEND 动态 import）
+│   │   ├── neon/           # Neon 实现：前台直连(nav_read) + 后台走函数代理
 │   │   │   └── index.ts
-│   │   └── rest/           # REST API 实现
+│   │   └── rest/           # REST API 实现（MySQL 参考后端，可选）
 │   │       └── index.ts
 │   ├── stores/
 │   │   ├── auth.ts         # 鉴权 Store
 │   │   └── home.ts         # 首页数据 Store
-│   ├── types/
 │   ├── views/
 │   │   ├── admin/          # 后台页面
 │   │   │   ├── AdminLayout.vue
@@ -196,10 +236,14 @@ server {
 │   ├── App.vue
 │   ├── main.ts
 │   └── style.css
+├── edge-functions/         # EdgeOne Functions 后台代理（登录 + 后台写）
+│   ├── index.js
+│   └── package.json
 ├── database/
-│   ├── supabase_schema.sql # PostgreSQL + RLS + 种子数据
-│   └── mysql_schema.sql    # MySQL + 种子数据
-├── backend-reference/      # Node.js Express 参考后端
+│   ├── neon_schema.sql     # Neon PostgreSQL + RLS(双角色) + GRANT + 种子数据
+│   ├── supabase_schema.sql # 历史参考（迁移前 Supabase 版本）
+│   └── mysql_schema.sql    # MySQL 参考后端 schema + 种子数据
+├── backend-reference/      # Node.js Express 参考后端（可选）
 │   ├── src/
 │   │   ├── index.js
 │   │   ├── middleware/
@@ -215,17 +259,27 @@ server {
 ## 后台管理
 
 - 后台地址：`http://localhost:5173/#/admin/login`
-- 默认管理员账号：`admin`
-- 管理员密码：在 Supabase Auth 中创建用户，或在 config 表中设置 `admin_user` / `admin_pwd`
+- 管理员用户名：`config.admin_user` 配置项（默认 `admin`）
+- 管理员密码：为 `config.admin_pwd` 中 bcrypt 哈希对应的明文密码（哈希由 EdgeOne Functions 在服务端校验，客户端无法读取）
 
 ## 环境变量说明
 
+**前端（构建变量，EdgeOne Pages 后台 / `.env`）**
+
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `VITE_BACKEND` | 是 | 后端模式：`supabase` 或 `rest` |
-| `VITE_SUPABASE_URL` | Supabase 模式 | Supabase 项目 URL |
-| `VITE_SUPABASE_ANON_KEY` | Supabase 模式 | Supabase 匿名密钥 |
-| `VITE_API_BASE_URL` | REST 模式 | 自建 API 地址 |
+| `VITE_BACKEND` | 否 | 后端模式：`neon`（默认）或 `rest` |
+| `VITE_NEON_DATABASE_URL` | neon 模式 | 浏览器直连 Neon 的连接串（角色 nav_read，RLS 过滤；内联进 bundle） |
+| `VITE_API_BASE_URL` | neon/rest 模式 | EdgeOne Functions 代理基地址（neon）或自建 API 地址（rest） |
+
+**EdgeOne Functions（服务端变量，不进 bundle）**
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `DATABASE_URL_ADMIN` | neon 模式 | nav_admin 连接串（后台代理执行 SQL 用） |
+| `JWT_SECRET` | neon 模式 | HS256 JWT 密钥（≥32 字符随机串） |
+
+> 已废弃：`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（Supabase 后端已移除）。
 
 ## License
 
