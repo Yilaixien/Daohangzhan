@@ -65,7 +65,7 @@ Browser (EdgeOne Pages 静态站)
  │                              → [函数] jose 验签(Bearer, 401 拒绝) → SQL 以 nav_admin 执行 → JSON 响应
  │    JWT 密钥 + DATABASE_URL_ADMIN 仅存函数环境变量，不进 bundle、不进浏览器
  └─ 会话: JWT 存 localStorage('auth_token')，仅用于 ①路由守卫(本地 exp) ②函数 API 的 Bearer 头
-        ⚠️ 定位声明: 对数据库层而言 JWT 只是"会话状态标记"（Postgres/RLS 不校验它、纳不起鉴权职责）;
+        ⚠️ 定位声明: 对数据库层而言 JWT 只是"会话状态标记"（Postgres/RLS 不校验它、担不起鉴权职责）;
            对函数 API 而言它是真实凭证（函数每次验签, 密钥仅服务端持有）。
 Neon:
  ├─ 6 张表 + 种子（沿用 PostgreSQL schema，去掉 Supabase 特有二段）
@@ -209,12 +209,13 @@ npx neon@latest skills -s neon -s neon-postgres -y
 
    - `SELECT key,value FROM config WHERE key IN ('admin_user','admin_pwd')`（nav\_admin 执行）
 
-   - `username === admin_user` 且 `bcrypt.compareSync(password, admin_pwd)`；失败统一返回 401 `{ message:'用户名或密码错误' }`
+   - `username === admin_user` 且 `await bcrypt.compare(password, admin_pwd)`（**用异步 compare，勿用同步 compareSync 以免阻塞边缘函数事件循环**）；失败统一返回 401 `{ message:'用户名或密码错误' }`
 
    - 成功：`new SignJWT({ role:'admin', sub:'admin' }).setExpirationTime('7d').sign(secret)` → `{ data:{ token } }`
 3. **其余路由**（全部先验签）：取 `Authorization: Bearer <t>` → `jwtVerify(t, secret)`，失败返回 401；通过后按路由执行 SQL（nav\_admin）：
 
    - `GET /links`、`GET /categories`、`GET /config`、`GET /config/:key`、`GET /search-engines`、`GET /apply[?status=]`
+     - 语义须知：这些是**后台读接口**，以 nav_admin 执行，**不加 `is_visible=true`/`is_active=true` 过滤（后台需看到隐藏/停用行）**；与前台直连 `links.getAll`（nav_read，仅可见行）语义不同——代码注释必须写明"后台读 = 不含可见性过滤，勿复用前台 SQL"，避免后续开发误用。
 
    - `POST /links`、`PUT /links/:id`、`DELETE /links/:id`（软删 is\_visible=false）、`POST /links/reorder`（**整体包进** **`sql.transaction([...])`**）
 
@@ -292,7 +293,7 @@ VITE_API_BASE_URL=https://your-functions-domain/api
 1. `\dt`：6 张表齐全；`SELECT count(*)` 校验种子：categories=6、search\_engines=5、links≈种子 60 条、config≈14 行。
 2. RLS 负向验证（以 nav\_read 连接）：
 
-   - `SELECT` links 只见 `is_visible=true`；`SELECT` config **不含 admin\_pwd 行**（dp 关键：`WHERE key='admin_pwd'` 返回空）；
+   - `SELECT` links 只见 `is_visible=true`；`SELECT` config **不含 admin_pwd 行**（重点：`WHERE key='admin_pwd'` 返回空）；
 
    - `INSERT INTO links` 报权限错误；`SELECT` apply 被拒；`INSERT INTO click_stats` 成功。
 

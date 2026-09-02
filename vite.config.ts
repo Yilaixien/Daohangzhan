@@ -18,7 +18,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id: string) {
-          if (id.includes('node_modules/@supabase/supabase-js')) return 'supabase'
+          if (id.includes('node_modules/@neondatabase/serverless')) return 'neon'
           if (id.includes('node_modules/chart.js')) return 'chart'
           if (id.includes('node_modules/vuedraggable')) return 'vuedraggable'
         },
