@@ -252,6 +252,8 @@ INSERT INTO search_engines (name, url_template, sort_order) VALUES
 -- admin_pwd 需在初始化时替换为 bcrypt hash:
 --   UPDATE config SET value='<bcrypt-hash>' WHERE key='admin_pwd';
 -- 生成: node -e "console.log(require('bcryptjs').hashSync('<16位以上强随机密码>', 10))"
+-- 注意: 成本因子固定 10。Edge Functions 单次执行 CPU 200ms（不含 I/O 等待）,
+--       bcryptjs 纯 JS 实现, cost>=11 有超限风险, cost=10 为安全取值。
 INSERT INTO config (key, value, description) VALUES
   ('title', '上网导航', '网站标题'),
   ('home-title', '<h2 class="title">上网，从这里开始！</h2>', '首页标题'),

@@ -1,15 +1,15 @@
-# Supabase → Neon 迁移实施方案（前端直连公开读 + EdgeOne Functions 代理后台）
+# Supabase → Neon 迁移实施方案（前端直连公开读 + EdgeOne Makers 单项目内置函数代理后台）
 
 ## 1. 概述
 
-将本导航站（Vue 3 SPA，部署于腾讯云 EdgeOne Pages）的数据库从 Supabase 迁移到 Neon (PostgreSQL)。
+将本导航站（Vue 3 SPA，部署于腾讯云 EdgeOne Makers——原 EdgeOne Pages 升级更名，平台内置函数能力）的数据库从 Supabase 迁移到 Neon (PostgreSQL)。
 
 用户已确认的关键决策：
 
 1. **数据迁移**：不迁移现有生产数据，直接用 [supabase\_schema.sql](file:///workspace/database/supabase_schema.sql) 的种子数据在 Neon 上重新初始化。
 2. **认证方案**：不使用任何外部 Auth 服务（含 Neon Managed Better Auth），自建极简 JWT 鉴权，仅 1 个超级管理员账号。
-3. **连接模式**：公开数据前端直连（延续当前直连形态）；后台登录与写操作经 **EdgeOne Functions 薄代理**（本期实施，代理先行）。
-4. **安全边界最高优先级**：`nav_admin` 连接串与 JWT 密钥**只存在于 EdgeOne Functions 服务端环境变量**，绝不出现在 VITE\_\* 构建变量/bundle 中。
+3. **连接模式**：公开数据前端直连（延续当前直连形态）；后台登录与写操作经 **EdgeOne Makers 单项目内的 Edge Functions 薄代理**（`edge-functions/api/**`，随项目一体化部署，本期实施，代理先行）。
+4. **安全边界最高优先级**：`nav_admin` 连接串与 JWT 密钥**只存在于 Makers 项目环境变量**（函数经 `context.env` 读取），绝不出现在 VITE\_\* 构建变量/bundle 中。
 
 > 重要架构发现（依据 Neon 官方文档）：Neon Data API（`@neondatabase/neon-js`，PostgREST 兼容）只接受**自定义 JWT 提供方经 JWKS URL 的非对称签名校验**，且匿名访问也需要 Auth 提供方签发匿名令牌——纯前端自签 HS256 JWT 无法通过其校验，因此本方案**不使用 Data API**。公开读采用 `@neondatabase/serverless` HTTP 驱动（浏览器内 `fetch` 到 `https://<compute-host>/sql`，请求内基本认证用 `nav_read` 连接串），RLS 在数据库层强制行级过滤；后台经函数代理走 `nav_admin`。
 
@@ -44,39 +44,39 @@
 
 ### 2.3 部署现状
 
-- 纯静态构建产物（`base: './'` + Hash 路由），上传 EdgeOne Pages，无 SPA fallback。
+- 纯静态构建产物（`base: './'` + Hash 路由）+ 项目内 `edge-functions/` 函数目录，整体部署到 EdgeOne Makers，无 SPA fallback。
 
-- VITE\_\* 变量在 EdgeOne Pages 后台按构建变量注入（构建期内联进 bundle）。
+- VITE\_\* 变量在 EdgeOne Makers 控制台按项目环境变量配置（构建期内联进 bundle）；`DATABASE_URL_ADMIN`/`JWT_SECRET` 同为项目环境变量（函数经 `context.env` 读取）。
 
-- 腾讯云 EdgeOne 还提供\*\*边缘函数（Edge Functions）\*\*能力，本次将新增一个薄函数承担登录与后台写代理。
+- 腾讯云 EdgeOne 已把 Pages 升级为 Makers，平台内置函数（Edge Functions）能力；函数以仓库 `edge-functions/` 目录承载（文件系统即路由），**整个项目（静态站+函数）作为一个 Makers 项目部署，无需单独部署边缘函数**。
 
 - [backend-reference/](file:///workspace/backend-reference) 是 MySQL 参考后端（当前未部署），不在本次迁移范围。
 
 ## 3. 目标架构
 
 ```
-Browser (EdgeOne Pages 静态站)
+Browser (EdgeOne Makers 单项目: 静态站 + edge-functions/api/**)
  ├─ 公开读写（前台，前端直连）: @neondatabase/serverless HTTP 驱动 (neon())
  │    VITE_NEON_DATABASE_URL → 角色 nav_read
  │    RLS: 仅可见行 SELECT / config(排除 admin_pwd) SELECT / apply INSERT / click_stats INSERT
- ├─ 登录 + 后台写（EdgeOne Functions 薄代理）: VITE_API_BASE_URL
+ ├─ 登录 + 后台写（Makers 项目内 Edge Functions, 文件系统路由）: 同域 VITE_API_BASE_URL=/api
  │    POST /api/auth/login      → [函数] 读 config.admin_user/admin_pwd(bcrypt) → bcrypt 校验 → 服务端 HS256 签发 JWT(7d)
  │    POST/GET/PUT /api/links|categories|config|search-engines|apply|stats
  │                              → [函数] jose 验签(Bearer, 401 拒绝) → SQL 以 nav_admin 执行 → JSON 响应
- │    JWT 密钥 + DATABASE_URL_ADMIN 仅存函数环境变量，不进 bundle、不进浏览器
+ │    JWT 密钥 + DATABASE_URL_ADMIN 仅存 Makers 项目环境变量(context.env)，不进 bundle、不进浏览器
  └─ 会话: JWT 存 localStorage('auth_token')，仅用于 ①路由守卫(本地 exp) ②函数 API 的 Bearer 头
         ⚠️ 定位声明: 对数据库层而言 JWT 只是"会话状态标记"（Postgres/RLS 不校验它、担不起鉴权职责）;
            对函数 API 而言它是真实凭证（函数每次验签, 密钥仅服务端持有）。
 Neon:
  ├─ 6 张表 + 种子（沿用 PostgreSQL schema，去掉 Supabase 特有二段）
  └─ 角色: nav_read（LOGIN, RLS 过滤, 凭据在 bundle=受 RLS 约束, 等同现行 anon key）
-          nav_admin（LOGIN, 全权, 凭据仅存函数环境变量）
+          nav_admin（LOGIN, 全权, 凭据仅存 Makers 项目环境变量）
 ```
 
 安全边界（按用户要求明确表述）：
 
 1. **JWT 定位**：自签 JWT 仅为"会话状态标记"，非数据库层安全凭证——密钥不进入 bundle（代理先行下由函数服务端持有）、数据库侧（Postgres/RLS）也不校验它。真正的数据安全边界是 **RLS 策略 + nav\_read/nav\_admin 双角色**。
-2. **凭据去向**：`nav_read` 连接串进 bundle 可接受（RLS 约束，等价 Supabase anon key）；`nav_admin` 连接串与 `JWT_SECRET` **只进 EdgeOne Functions 环境变量**，从 bundle 彻底移除 —— 原"admin 连接串进 bundle 列为已知并接受风险"的条款在代理先行下**不再适用**；若未来回退纯前端直连，则该条款重新生效（§7 回退说明）。
+2. **凭据去向**：`nav_read` 连接串进 bundle 可接受（RLS 约束，等价 Supabase anon key）；`nav_admin` 连接串与 `JWT_SECRET` **只进 Makers 项目环境变量**（函数经 `context.env` 读取），从 bundle 彻底移除 —— 原"admin 连接串进 bundle 列为已知并接受风险"的条款在代理先行下**不再适用**；若未来回退纯前端直连，则该条款重新生效（§7 回退说明）。
 3. **性能说明**：Neon 免费档 compute 空闲缩容，冷启动约 200\~500ms 属正常；首次访问/首次后台操作会有一次冷启动延迟，之后回到毫秒级。函数亦可能有小冷启动，均不影响功能。
 
 ## 4. 实施步骤
@@ -192,19 +192,29 @@ npx neon@latest skills -s neon -s neon-postgres -y
 
 5. [vite.config.ts](file:///workspace/vite.config.ts#L21)：manualChunks 的 `@supabase/supabase-js → @neondatabase/serverless`。
 
-### 第 4 步：EdgeOne Functions 登录/后台写代理（本期核心）
+### 第 4 步：EdgeOne Makers 函数代理（登录 + 后台写，本期核心）
 
-新增 `edge-functions/`（或按 EdgeOne 控制台要求组织的函数工程），单一函数入口，运行时需支持 Node 兼容（jose/bcryptjs/@neondatabase/serverless 均为纯 JS 实现，边缘运行时可用）：
+按 Makers 文件系统路由约定组织：新增 `edge-functions/api/[[default]].js`（承载全部 `/api/**`），入口为平台约定的 `export default function onRequest(context)`，`context.request` 为标准 Request、`context.env` 为 Makers 项目环境变量。运行时基于 V8 + Web Service Worker API（无 Node 内建），依赖由 `edge-functions/package.json` 声明（Makers 构建时安装）。函数逻辑层仍是标准 Web Request/Response（jose/bcryptjs/@neondatabase/serverless 均为纯 JS）：
 
-1. **依赖与初始化**：
+1. **依赖与初始化（关键：按值缓存, 连接池全局单例）**：
 
    ```js
    import { neon } from '@neondatabase/serverless'
    import { SignJWT, jwtVerify } from 'jose'
    import bcrypt from 'bcryptjs'
-   const sql = neon(process.env.DATABASE_URL_ADMIN)   // nav_admin 连接串, 仅服务端
-   const secret = new TextEncoder().encode(process.env.JWT_SECRET)
+   const runtimeCache = new Map()
+   function getRuntime(env) {
+     const dbUrl = env?.DATABASE_URL_ADMIN || process.env?.DATABASE_URL_ADMIN
+     const jwtSecret = env?.JWT_SECRET || process.env?.JWT_SECRET
+     const cacheKey = `${dbUrl}::${jwtSecret}`
+     if (!runtimeCache.has(cacheKey)) {
+       if (!dbUrl || !jwtSecret) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
+       runtimeCache.set(cacheKey, { sql: neon(dbUrl), secret: new TextEncoder().encode(jwtSecret) }) // neon() 连接池单例
+     }
+     return runtimeCache.get(cacheKey)
+   }
    ```
+   注意：缓存键不可用 `env` 对象本身（`context.env` 每请求新建对象, 会永远 miss → 每请求新建连接池 → 内存溢出）。
 2. **`POST /auth/login`**：参数 `{ username, password }`
 
    - `SELECT key,value FROM config WHERE key IN ('admin_user','admin_pwd')`（nav\_admin 执行）
@@ -240,7 +250,7 @@ npx neon@latest skills -s neon -s neon-postgres -y
      - trend：`SELECT to_char(clicked_at,'YYYY-MM-DD') d, count(*) FROM click_stats WHERE clicked_at>=$1 GROUP BY 1 ORDER BY 1`（前端补 0 逻辑保留）
 4. **响应与 CORS**：统一 `{ data }`/`{ message }` + 状态码；所有响应带 `Access-Control-Allow-Origin: *`（或配置的域名）与 `Access-Control-Allow-Headers: Authorization, Content-Type`；`OPTIONS` 预检直接 204。CORS 头由函数代码保证（必要时也按 EdgeOne 控制台/边缘函数配置放行）。
 5. **函数环境变量**（服务端，不内联 bundle）：`DATABASE_URL_ADMIN`（nav\_admin 连接串）、`JWT_SECRET`（≥32 字符随机串）。
-6. **部署**：按 EdgeOne 边缘函数控制台流程发布（域名/触发路径需与 `VITE_API_BASE_URL` 对应；路径规范与绑定域名以控制台为准，执行时对照 EdgeOne 文档）。
+6. **部署**：按「EdgeOne Makers 一体化部署」执行——`npm run build`（产物 `dist/` 自包含 `edge-functions/` 与 `edge-functions/package.json`）→ `edgeone makers deploy ./dist`；无需单独部署边缘函数/绑定域名（同域 `/api` 文件系统路由）。
 
 ### 第 5 步：前端 auth 服务与自建 JWT 会话
 
@@ -261,15 +271,14 @@ npx neon@latest skills -s neon -s neon-postgres -y
 VITE_BACKEND=neon
 # 浏览器直连 Neon HTTP /sql 的连接串（角色 nav_read，RLS 过滤公开数据; 进 bundle, 安全边界=RLS）
 VITE_NEON_DATABASE_URL=postgresql://nav_read:xxx@ep-xxx.region.aws.neon.tech/neondb?sslmode=require
-# EdgeOne Functions 代理基地址（含路由前缀, 如 https://edge-function.example.com/api）
-VITE_API_BASE_URL=https://your-functions-domain/api
+# EdgeOne Makers 同站函数路由（edge-functions/api/**）; 默认相对路径同域调用, 自定义域名再覆盖
+VITE_API_BASE_URL=/api
 ```
 
-> 注意：`nav_admin` 连接串与 `JWT_SECRET` **不写入** **`.env.example`**，仅配置在 EdgeOne Functions 环境变量。
+> 注意：`nav_admin` 连接串与 `JWT_SECRET` **不写入** **`.env.example`**，配置在 EdgeOne Makers 控制台项目环境变量（函数经 `context.env` 读取）。
 
-**EdgeOne Pages（构建变量，进 bundle）**：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`、`VITE_API_BASE_URL`；删除旧 `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`。
-**EdgeOne Functions（服务端变量，不进 bundle）**：`DATABASE_URL_ADMIN`、`JWT_SECRET`。
-部署沿用：构建命令 `npm run build`、输出目录 `dist`、无需 SPA fallback。
+**EdgeOne Makers 项目环境变量：** 构建变量（进 bundle）`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`、`VITE_API_BASE_URL=/api`；函数变量（不进 bundle）`DATABASE_URL_ADMIN`、`JWT_SECRET`；删除旧 `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`。
+部署：`npm run build`（产物 `dist/` 自包含 `edge-functions/` 与函数依赖清单）→ `edgeone makers deploy ./dist`；输出目录 `dist`、无需 SPA fallback（Hash 路由）。本地调试 `edgeone makers dev`（函数与前端同端口, `VITE_API_BASE_URL=/api` 同域无跨域）。
 
 ### 第 7 步：验证（详见 §6）
 
@@ -309,8 +318,8 @@ VITE_API_BASE_URL=https://your-functions-domain/api
 
 ### 6.3 构建与线上
 
-1. `npm run build` 通过（vue-tsc 无类型错误；本仓库 build 脚本先 `rm -rf node_modules && npm install`，耗时长属正常）。
-2. `dist/` 上传 EdgeOne Pages；EdgeOne Functions 部署代理；两侧环境变量按 §6 配置后触发部署。
+1. `npm run build` 通过（vue-tsc 无类型错误；build 脚本已完成「纯构建 + 产物自包含」，不再清空重装依赖）。
+2. `dist/`（含 `edge-functions/`）整包作为单个 Makers 项目部署；项目环境变量按 §5 配置后触发部署。
 3. 线上复测 6.2 全流程；**抽查产物**：在 `dist/assets/*.js` 中 `grep` 确认不含 `nav_admin` 连接串特征与 `JWT_SECRET` 值。
 
 ## 7. 风险与说明
@@ -319,8 +328,8 @@ VITE_API_BASE_URL=https://your-functions-domain/api
 2. **冷启动**：Neon 免费档空闲缩容，首次请求约 200\~500ms，属正常；可用 Neon 控制台调低自动休眠或忽略。
 3. **JWT 安全**：密钥仅服务端持有；函数每次验签；客户端只用 `exp` 做路由守卫（非安全判定）。`JWT_SECRET` 轮换=旧 token 全失效，操作前知会。
 4. **事务**：HTTP/边缘场景无交互式事务；`apply/approve` 与 `links.reorder`、`categories.reorder` 一律用 `sql.transaction([...])` 非交互事务保证原子性。
-5. **回退与运维**：若未来停用 EdgeOne Functions：回退纯前端直连时，admin 连接串与 JWT 密钥必须进入 VITE\_\*（即重新接受"已知风险条款"，且 `rd_config` 需改回允许读 admin\_pwd 或登录改走 admin 连接串——届时按 §7.5 原始备注执行）。当前代理先行下该项风险已消除。
-6. **EdgeOne Functions 依赖**：需确认账号已开通边缘函数能力（用户已确认可开通）；函数配额/冷启动不影响功能。
+5. **回退与运维**：若未来停用 Makers 函数（Edge Functions）：回退纯前端直连时，admin 连接串与 JWT 密钥必须进入 VITE\_\*（即重新接受"已知风险条款"，且 `rd_config` 需改回允许读 admin\_pwd 或登录改走 admin 连接串）。当前代理先行下该项风险已消除。
+6. **Makers 函数限制**：Edge Functions 单次执行 CPU 200ms（不含 I/O 等待）、代码包 ≤5MB、请求 body ≤1MB。本方案已适配：bcrypt 成本因子固定 10、函数按值缓存连接池单例、`await bcrypt.compare` 异步化；登录/后台接口均为轻量 SQL。若后续复杂化，留意 CPU 预算。
 
 ## 8. 明示假设
 
@@ -330,7 +339,7 @@ VITE_API_BASE_URL=https://your-functions-domain/api
 
 - `@neondatabase/serverless` 浏览器直连 `/sql` 的 CORS 默认放行（§6.2 第 2 项验证；被拦则按 §7-1 回退）。
 
-- EdgeOne Functions 运行时兼容 Node 化依赖（jose/bcryptjs/@neondatabase/serverless 均为纯 JS）。
+- EdgeOne Makers Edge Functions 运行时基于 V8 + Web Service Worker API（无 Node 内建；环境变量经 `context.env` 读取）；jose/bcryptjs/@neondatabase/serverless 均为纯 JS，可由 `edge-functions/package.json` 声明安装。
 
 - [backend-reference/](file:///workspace/backend-reference)（MySQL 参考后端）与 `rest` 服务保持不动；本次仅替换 `supabase` 实现。
 

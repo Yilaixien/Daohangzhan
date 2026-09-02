@@ -45,20 +45,26 @@ export default function onRequest(context) {
 }
 ```
 
-- **环境变量注入改造（关键）**：模块顶层不再读 `process.env`（边缘运行时无 `process`）。改为按请求惰性初始化，兼容 `context.env`（线上）与 `process.env`（本地/工具调试）：
+- **环境变量注入改造（关键）**：模块顶层不再读 `process.env`（边缘运行时无 `process`）。改为按请求惰性初始化、**按值缓存**，兼容 `context.env`（线上）与 `process.env`（本地/工具调试）：
 
 ```js
 const runtimeCache = new Map()
 function getRuntime(env) {
-  const e = { ...(typeof process !== 'undefined' ? process.env : {}), ...(env || {}) }
-  if (!runtimeCache.has(env)) runtimeCache.set(env, createRuntime(e))
-  return runtimeCache.get(env)
-}
-function createRuntime(e) {
-  if (!e.DATABASE_URL_ADMIN || !e.JWT_SECRET) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
-  return { sql: neon(e.DATABASE_URL_ADMIN), secret: new TextEncoder().encode(e.JWT_SECRET) }
+  const dbUrl = env?.DATABASE_URL_ADMIN || process.env?.DATABASE_URL_ADMIN
+  const jwtSecret = env?.JWT_SECRET || process.env?.JWT_SECRET
+  const cacheKey = `${dbUrl}::${jwtSecret}`
+  if (!runtimeCache.has(cacheKey)) {
+    if (!dbUrl || !jwtSecret) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
+    runtimeCache.set(cacheKey, {
+      sql: neon(dbUrl), // neon() 返回连接池 → 必须全局单例，按 cacheKey 只创建一次
+      secret: new TextEncoder().encode(jwtSecret),
+    })
+  }
+  return runtimeCache.get(cacheKey)
 }
 ```
+
+> 注意：缓存键不可用 `env` 对象本身——`context.env` 每次请求都由平台新建对象，用对象做键会永远 miss，导致每个请求都 `neon()` 新建连接池，最终内存溢出。按 `dbUrl::jwtSecret` 字符串缓存为唯一正确做法。
 
 - 顶部注释同步更新：路由约定、`context.env`、一键部署说明。
 
@@ -66,18 +72,18 @@ function createRuntime(e) {
 
 ### 3.2 函数依赖与构建产物
 
-**[edge-functions/package.json](file:///workspace/edge-functions/package.json)**：保留（声明 jose / bcryptjs / @neondatabase/serverless），随目录复制进产物。
+**[edge-functions/package.json](file:///workspace/edge-functions/package.json)**：保留并作为**函数依赖的唯一声明来源**（jose / bcryptjs / @neondatabase/serverless），Makers 平台构建/部署时读取该文件为函数安装依赖——**根 package.json 不新增 jose/bcryptjs**。
 **[package.json](file:///workspace/package.json)**（根）：
 
-- `dependencies` 增加 `jose`、`bcryptjs`（函数依赖随构建产物可被平台识别安装；前端 bundle 不 import 这两个包，Vite 不会将其打入前端产物，不影响前端体积）。
+- `dependencies` **保持不变**（不含 jose/bcryptjs，避免干扰前端模块解析）。
 
-- `build` 脚本追加：`vite build` 后将函数目录与依赖清单并入输出目录（自包含，供 `edgeone makers deploy ./dist`）：
+- `build` 脚本**去掉** **`rm -rf node_modules package-lock.json && npm install`**（会反复清空重装依赖，且在新依赖进根 package.json 时导致 Vite 模块解析路径变化报错），改为纯构建 + 产物自包含：
 
 ```json
-"build": "rm -rf node_modules package-lock.json && npm install && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp package.json dist/package.json"
+"build": "vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json"
 ```
 
-> 执行期第一验证项：`edgeone makers dev` / `edgeone makers deploy ./dist` 实测平台如何解析函数第三方依赖；若平台按 `dist/package.json` 安装，上述改动即满足；若平台另有约定（如仅认 `edge-functions/package.json`），按实测微调复制目标，不改动业务代码。
+（`cp -r edge-functions dist/edge-functions` 已含 `package.json`；末句为显式声明，幂等无害。）产物 `dist/` 内函数目录自包含，`edgeone makers deploy ./dist` 即可被平台识别并按其 `edge-functions/package.json` 安装函数依赖。
 
 ### 3.3 前端同域 API 基地址
 
@@ -126,9 +132,9 @@ VITE_API_BASE_URL=/api
 
 - 前端 `apiFetch` 路径与函数路由天然对齐（`/auth/login`、`/links` 等均在 `edge-functions/api/[[default]].js` 分发逻辑内），**业务契约与路由表不变**。
 
-- Makers 平台对函数第三方依赖的安装方式以实际部署/本地 `edgeone makers dev` 为准（见 3.2 验证项）；方案给出满足官方「输出目录自包含」指引的默认做法。
+- Makers 平台读取 `edge-functions/package.json` 为函数安装第三方依赖（用户确认）；执行期仍以 `edgeone makers dev`/`deploy` 实测复核，但根依赖不再承载函数依赖。
 
-- 保留 root `.env.example` 的 `VITE_BACKEND`/`VITE_NEON_DATABASE_URL`（构建期使用不变）；`rest`（MySQL 参考后端）模式不受影响。
+- `rest`（MySQL 参考后端）模式不受影响；`VITE_BACKEND`/`VITE_NEON_DATABASE_URL` 构建期用法不变。
 
 - 不手工生成 `edgeone.json`/示例函数：由执行者运行 `edgeone makers init`/`dev` 时按 CLI 实际提示生成/确认，避免臆造配置格式。
 
@@ -136,24 +142,24 @@ VITE_API_BASE_URL=/api
 
 ## 5. 验证步骤
 
-1. **语法/静态**：`node --check edge-functions/api/[[default]].js` 通过；确认旧 `edge-functions/index.js` 已删除。
-2. **构建产物**：`npm install` 后 `npm run build` 通过；检查 `dist/` 内含 `edge-functions/api/[[default]].js` 与 `package.json`（含 jose/bcryptjs）；确认产物 JS 中无 `DATABASE_URL_ADMIN`/`JWT_SECRET` 字样（grep 抽查）。
+1. **语法/静态**：`node --check 'edge-functions/api/[[default]].js'`（方括号路径需引号）通过；确认旧 `edge-functions/index.js` 已删除。
+2. **构建产物**：`npm install`（根，一次即可）→ `npm run build` 通过（不再清空重装 node\_modules）；检查 `dist/` 内含 `edge-functions/api/[[default]].js` 与 `edge-functions/package.json`（含 jose/bcryptjs/@neondatabase/serverless 声明）；确认根 package.json 不含 jose/bcryptjs、产物 JS 中无 `DATABASE_URL_ADMIN`/`JWT_SECRET` 字样（grep 抽查）。
 3. **本地函数调试（执行期实测项，需用户环境）**：`npm i -g edgeone` → `edgeone login`（选 China）→ `edgeone makers dev`：验证 ①函数依赖能否解析（jose/bcryptjs/@neondatabase/serverless）；②`context.env` 读取到控制台同步的环境变量；③`POST /api/auth/login` 正确签发/401；④同域 `VITE_API_BASE_URL=/api` 下浏览器无 CORS 报错。
 4. **部署（用户侧）**：控制台创建 Makers 项目并配置环境变量 → `edgeone makers deploy ./dist`（或控制台上传）→ 线上复测：首页渲染、申请提交、点击统计、后台登录/CRUD/审核/统计、伪造 token 被函数 401 拦截。
 5. **文档一致性**：README 部署章节与实施文档表述与现状一致（单 Makers 项目，无「单独部署边缘函数」残留表述）。
 
 ## 6. 变更记录清单（供最终汇报复用）
 
-| 文件                                                                                               | 变更                                                      | 原因/影响                          |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------------------------------ |
-| [edge-functions/api/\[\[default\]\].js](file:///workspace/edge-functions/api/\[\[default]].js)   | 新增（函数逻辑 + `onRequest(context)` 适配 + `context.env` 惰性注入） | 符合 Makers 文件系统路由，函数随项目部署       |
-| [edge-functions/index.js](file:///workspace/edge-functions/index.js)                             | 删除                                                      | 避免生成干扰静态首页的根路由；逻辑迁入新入口         |
-| [edge-functions/package.json](file:///workspace/edge-functions/package.json)                     | 保留（依赖声明）                                                | 随产物进入部署目录                      |
-| [package.json](file:///workspace/package.json)                                                   | +jose、+bcryptjs；build 脚本追加复制函数目录与 package.json 进 dist   | 产物自包含，支撑单项目部署；前端体积不受影响         |
-| [src/services/neon/index.ts](file:///workspace/src/services/neon/index.ts#L16-L18)               | `apiBase` 默认 `/api`                                     | Makers 同域路由，消除跨域；保留环境变量覆盖      |
-| [.env.example](file:///workspace/.env.example)                                                   | `VITE_API_BASE_URL=/api` + 说明                           | 同域部署示例                         |
-| [README.md](file:///workspace/README.md)                                                         | 部署指南重构为单 Makers 项目；路由/环境变量/结构树同步                        | 使用指南与现状一致                      |
-| [.trae/documents/Supabase迁移Neon实施方案.md](file:///workspace/.trae/documents/Supabase迁移Neon实施方案.md) | 同步部署/验证/风险章节                                            | 架构设计文档与实现一致                    |
-| [database/neon\_schema.sql](file:///workspace/database/neon_schema.sql)                          | bcrypt cost 统一为 10 的注释                                  | 规避 Edge Functions CPU 200ms 限制 |
+| 文件                                                                                               | 变更                                                                             | 原因/影响                                                    |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| [edge-functions/api/\[\[default\]\].js](file:///workspace/edge-functions/api/\[\[default]].js)   | 新增（函数逻辑 + `onRequest(context)` 适配 + `context.env` 惰性注入）                        | 符合 Makers 文件系统路由，函数随项目部署                                 |
+| [edge-functions/index.js](file:///workspace/edge-functions/index.js)                             | 删除                                                                             | 避免生成干扰静态首页的根路由；逻辑迁入新入口                                   |
+| [edge-functions/package.json](file:///workspace/edge-functions/package.json)                     | 保留，作为函数依赖唯一声明来源                                                                | 平台据此为函数安装 jose/bcryptjs/@neondatabase/serverless；根依赖不再承载 |
+| [package.json](file:///workspace/package.json)                                                   | build 脚本去掉 `rm -rf node_modules && npm install`，追加复制函数目录进 dist；dependencies 不变 | 消除重装隐患，产物自包含；前端依赖/体积不受影响                                 |
+| [src/services/neon/index.ts](file:///workspace/src/services/neon/index.ts#L16-L18)               | `apiBase` 默认 `/api`                                                            | Makers 同域路由，消除跨域；保留环境变量覆盖                                |
+| [.env.example](file:///workspace/.env.example)                                                   | `VITE_API_BASE_URL=/api` + 说明                                                  | 同域部署示例                                                   |
+| [README.md](file:///workspace/README.md)                                                         | 部署指南重构为单 Makers 项目；路由/环境变量/结构树同步                                               | 使用指南与现状一致                                                |
+| [.trae/documents/Supabase迁移Neon实施方案.md](file:///workspace/.trae/documents/Supabase迁移Neon实施方案.md) | 同步部署/验证/风险章节                                                                   | 架构设计文档与实现一致                                              |
+| [database/neon\_schema.sql](file:///workspace/database/neon_schema.sql)                          | bcrypt cost 统一为 10 的注释                                                         | 规避 Edge Functions CPU 200ms 限制                           |
 
 无需修改：`src/services/contracts.ts`（契约不变）、`src/services/rest/index.ts`（rest 参考模式不受影响）、`backend-reference/`（MySQL 参考后端不变）、`.trae/specs/` 与历史 `/.trae/documents/` 其余方案（历史记录）。

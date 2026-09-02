@@ -2,19 +2,21 @@ import { neon } from '@neondatabase/serverless'
 import type { Services, Link, Category, Apply, SearchEngine, StatsOverview } from '../contracts'
 
 // ============================================================
-// Neon（PostgreSQL）服务实现 —— 前端直连公开读 + EdgeOne Functions 代理后台
+// Neon（PostgreSQL）服务实现 —— 前端直连公开读 + EdgeOne Makers 函数代理后台
 //
 // 数据源分工：
 //  - 公开读写：浏览器直连 Neon HTTP /sql（角色 nav_read，RLS 强制行级过滤，
 //    等价 Supabase anon key）。见 database/neon_schema.sql 的 rd_* 策略。
-//  - 后台读写：一律走 EdgeOne Functions 代理（函数内以 nav_admin 执行，
-//    后台读含隐藏/停用行 —— 与该实现的前台直连 SQL 语义不同，勿互相复用）。
+//  - 后台读写：一律走 Makers 项目内 Edge Functions（edge-functions/api/**，
+//    函数内以 nav_admin 执行，后台读含隐藏/停用行 —— 与该实现的前台直连 SQL
+//    语义不同，勿互相复用）。函数随 Makers 单项目部署，同域路由，默认 /api。
 //  - JWT 定位：自签 JWT 仅是"会话状态标记"（localStorage 路由守卫 + 函数 API 的
-//    Bearer 头）；Postgres/RLS 不校验它。密钥只存在于函数服务端环境变量。
+//    Bearer 头）；Postgres/RLS 不校验它。密钥只存在于 Makers 项目环境变量。
 // ============================================================
 
 const neonDbUrl = import.meta.env.VITE_NEON_DATABASE_URL as string | undefined
-const apiBase = (import.meta.env.VITE_API_BASE_URL as string) || ''
+// Makers 同域部署：函数路由即 <站点>/api/**，默认相对路径 /api（无跨域）；可用 VITE_API_BASE_URL 覆盖
+const apiBase = (import.meta.env.VITE_API_BASE_URL as string) || '/api'
 
 if (!neonDbUrl) {
   throw new Error('缺少环境变量 VITE_NEON_DATABASE_URL（浏览器直连 Neon 的 nav_read 连接串）')

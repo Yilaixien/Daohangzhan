@@ -1,41 +1,54 @@
 /**
- * EdgeOne Functions —— 登录 + 后台写代理（"前端直连 + 代理后台"的薄后端）
+ * EdgeOne Makers Edge Functions —— 登录 + 后台写代理（"前端直连 + 代理后台"的薄后端）
+ *
+ * 路由：本项目作为单个 Makers 项目部署, 本文件位于 edge-functions/api/ 目录,
+ *       由平台文件系统路由映射为 <站点>/api/**（多级匹配, [[default]] 兜底）,
+ *       前端 VITE_API_BASE_URL 默认采用同域 '/api', 无需跨域。
  *
  * 职责：
- *  - POST /auth/login    校验 config.admin_user/admin_pwd(bcrypt) 后签发 HS256 JWT（7d）
- *  - 其余路由            验签(Bearer) 后以 nav_admin 执行 SQL, 返回 { data } / { message }
+ *  - POST /api/auth/login   校验 config.admin_user/admin_pwd(bcrypt) 后签发 HS256 JWT（7d）
+ *  - 其余 /api/* 路由        验签(Bearer) 后以 nav_admin 执行 SQL, 返回 { data } / { message }
  *
  * 安全边界：
- *  - DATABASE_URL_ADMIN（nav_admin 连接串）与 JWT_SECRET 只存本函数环境变量, 不落入前端 bundle
+ *  - DATABASE_URL_ADMIN（nav_admin 连接串）与 JWT_SECRET 只存 Makers 项目环境变量
+ *    （函数经 context.env 读取, 不进前端 bundle）
  *  - 后台读 = 不含 is_visible/is_active 过滤（后台需看到隐藏/停用行）, 与前台直连 SQL 语义不同, 勿复用
  *  - JWT 对数据库层仅是会话状态标记（Postgres/RLS 不校验）；本函数每次 jwtVerify 验签
  *
- * 部署：
- *  - 函数环境变量：DATABASE_URL_ADMIN（nav_admin 连接串）、JWT_SECRET（≥32 字符随机串）
- *  - 触发路径与前端 VITE_API_BASE_URL 对应（如 https://<函数域名>/api）
- *  - 依赖：npm i @neondatabase/serverless jose bcryptjs
- *  - EdgeOne 边缘函数事件契约可能与本文件入口略有差异, 部署时对照控制台文档
- *    调整 handleRequest 之上的平台适配层（这里按 Web 标准 Request/Response 实现）
+ * 环境变量注入：
+ *  - 线上: context.env（Makers 平台每次请求新建对象, 不可作缓存键）
+ *  - 本地/工具: process.env 兜底
+ *  - 缓存键使用 dbUrl::jwtSecret 字符串; neon() 返回连接池, 必须全局单例只建一次
+ *
+ * 平台限制提醒：单次执行 CPU 200ms（不含 I/O 等待）。bcrypt 校验为 CPU 计算,
+ *   成本因子固定 10（cost>=11 有超限风险）, 登录接口尽量精简。函数代码包 <=5MB。
  */
 import { neon } from '@neondatabase/serverless'
 import { SignJWT, jwtVerify } from 'jose'
 import bcrypt from 'bcryptjs'
-
-const DATABASE_URL_ADMIN = process.env.DATABASE_URL_ADMIN
-const JWT_SECRET = process.env.JWT_SECRET
-
-if (!DATABASE_URL_ADMIN || !JWT_SECRET) {
-  throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET（仅配置在函数服务端）')
-}
-
-const sql = neon(DATABASE_URL_ADMIN)
-const secret = new TextEncoder().encode(JWT_SECRET)
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Content-Type': 'application/json; charset=utf-8',
+}
+
+// ---------- 运行时（按值缓存, 全局单例） ----------
+const runtimeCache = new Map()
+function getRuntime(env) {
+  const dbUrl = env?.DATABASE_URL_ADMIN || process.env?.DATABASE_URL_ADMIN
+  const jwtSecret = env?.JWT_SECRET || process.env?.JWT_SECRET
+  const cacheKey = `${dbUrl}::${jwtSecret}`
+  if (!runtimeCache.has(cacheKey)) {
+    if (!dbUrl || !jwtSecret) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
+    // neon() 返回连接池 → 必须全局单例, 按 cacheKey 只创建一次
+    runtimeCache.set(cacheKey, {
+      sql: neon(dbUrl),
+      secret: new TextEncoder().encode(jwtSecret),
+    })
+  }
+  return runtimeCache.get(cacheKey)
 }
 
 function ok(data, status = 200) {
@@ -48,19 +61,19 @@ function fail(message, status = 400) {
 
 const first = (rows) => (Array.isArray(rows) && rows.length ? rows[0] : undefined)
 
-// 单个待办接口：单条 SQL 即一个隐式事务, 天然原子
-async function verifyToken(request) {
+async function verifyToken(request, rt) {
   const auth = request.headers.get('Authorization') || ''
   if (!auth.startsWith('Bearer ')) return null
   try {
-    return await jwtVerify(auth.slice(7), secret)
+    return await jwtVerify(auth.slice(7), rt.secret)
   } catch {
     return null
   }
 }
 
 // ---------- 登录 ----------
-async function login(request) {
+async function login(request, rt) {
+  const { sql } = rt
   const body = await request.json().catch(() => ({}))
   const { username, password } = body || {}
   const rows = await sql`SELECT key, value FROM config WHERE key IN ('admin_user','admin_pwd')`
@@ -71,7 +84,7 @@ async function login(request) {
   if (username !== adminUser || !adminPwdHash) {
     return fail('用户名或密码错误', 401)
   }
-  // 异步 compare, 勿用同步 compareSync 以免阻塞事件循环
+  // 异步 compare, 勿用同步 compareSync 以免阻塞事件循环/耗光 CPU 时间片
   const passwordValid = await bcrypt.compare(password || '', adminPwdHash)
   if (!passwordValid) {
     return fail('用户名或密码错误', 401)
@@ -80,22 +93,23 @@ async function login(request) {
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(secret)
+    .sign(rt.secret)
   return ok({ token })
 }
 
 // ---------- 后台读写路由 ----------
 // 语义须知：后台读均不加 is_visible/is_active 过滤（需含隐藏/停用行）, 勿与前台直连 SQL 混用
-async function handleApi(url, request, body) {
+async function handleApi(url, request, body, rt) {
+  const { sql } = rt
   const segments = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean)
 
-  // POST /auth/login（无需验签）
+  // POST /api/auth/login（无需验签）
   if (url.pathname.replace(/\/+$/, '').endsWith('/auth/login') && request.method === 'POST') {
-    return login(request)
+    return login(request, rt)
   }
 
   // 其余一律验签
-  if (!(await verifyToken(request))) {
+  if (!(await verifyToken(request, rt))) {
     return fail('认证令牌无效或已过期', 401)
   }
 
@@ -122,7 +136,7 @@ async function handleApi(url, request, body) {
   }
   // PUT /links/:id
   if (segments[0] === 'links' && segments.length === 2 && request.method === 'PUT') {
-    const updated = await updateByWhitelist('links', 'id', segments[1], body, ['title', 'url', 'description', 'category_id', 'icon', 'sort_order', 'is_visible'])
+    const updated = await updateByWhitelist('links', 'id', segments[1], body, ['title', 'url', 'description', 'category_id', 'icon', 'sort_order', 'is_visible'], rt)
     return ok(updated)
   }
   // DELETE /links/:id（软删除, 保留后台可见可恢复）
@@ -159,7 +173,7 @@ async function handleApi(url, request, body) {
     return ok(created[0])
   }
   if (segments[0] === 'categories' && segments.length === 2 && request.method === 'PUT') {
-    const updated = await updateByWhitelist('categories', 'id', segments[1], body, ['name', 'sort_order', 'is_visible'])
+    const updated = await updateByWhitelist('categories', 'id', segments[1], body, ['name', 'sort_order', 'is_visible'], rt)
     return ok(updated)
   }
   if (segments[0] === 'categories' && segments.length === 2 && request.method === 'DELETE') {
@@ -252,7 +266,7 @@ async function handleApi(url, request, body) {
     return ok(created[0])
   }
   if (segments[0] === 'search-engines' && segments.length === 2 && request.method === 'PUT') {
-    const updated = await updateByWhitelist('search_engines', 'id', segments[1], body, ['name', 'url_template', 'icon', 'sort_order', 'is_active'])
+    const updated = await updateByWhitelist('search_engines', 'id', segments[1], body, ['name', 'url_template', 'icon', 'sort_order', 'is_active'], rt)
     return ok(updated)
   }
   if (segments[0] === 'search-engines' && segments.length === 2 && request.method === 'DELETE') {
@@ -314,7 +328,8 @@ async function handleApi(url, request, body) {
 }
 
 // 白名单动态 UPDATE（列名来自常量, 无注入风险）
-async function updateByWhitelist(table, idCol, id, body, allowedFields) {
+async function updateByWhitelist(table, idCol, id, body, allowedFields, rt) {
+  const { sql } = rt
   const sets = []
   const params = []
   for (const field of allowedFields) {
@@ -332,24 +347,33 @@ async function updateByWhitelist(table, idCol, id, body, allowedFields) {
   return rows[0]
 }
 
-// ---------- 入口（平台适配层） ----------
+// ---------- 入口（Makers 约定） ----------
 /**
- * EdgeOne 边缘函数入口。本实现按 Web 标准 Request/Response 编写,
- * 事件契约以 EdgeOne 控制台文档为准, 按需在此层做转换:
- *   例: export default async function (event) { const req = 从 event 构造 Request; return handleRequest(req) }
+ * Makers Edge Functions 入口: export default onRequest(context)
+ * context.request = 标准 Request; context.env = Makers 环境变量（每次请求为新对象, 不可作缓存键）
+ * 本文件路径 edge-functions/api/[[default]].js → 站点 /api/** 全部由此分发
  */
-export async function handleRequest(request) {
+export async function handleRequest(request, env) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS })
+  }
+  let rt
+  try {
+    rt = getRuntime(env)
+  } catch (error) {
+    console.error('[runtime init]', error)
+    return fail(error?.message || 'Internal Server Error', 500)
   }
   const url = new URL(request.url)
   const body = request.method === 'GET' || request.method === 'DELETE' ? null : await request.json().catch(() => ({}))
   try {
-    return await handleApi(url, request, body)
+    return await handleApi(url, request, body, rt)
   } catch (error) {
     console.error(error)
     return fail(error?.message || 'Internal Server Error', 500)
   }
 }
 
-export default handleRequest
+export default function onRequest(context) {
+  return handleRequest(context.request, context.env)
+}
