@@ -8,6 +8,7 @@
  * 职责：
  *  - POST /api/auth/login   校验 config.admin_user/admin_pwd(bcrypt) 后签发 HS256 JWT（7d）
  *  - 其余 /api/* 路由        验签(Bearer) 后以 nav_admin 执行 SQL, 返回 { data } / { message }
+ *  - PUT /config/admin_pwd  写入时数据库侧 bcrypt 加密；GET 一律脱敏（哈希不出服务器）
  *
  * 安全边界：
  *  - DATABASE_URL_ADMIN（nav_admin 连接串）与 JWT_SECRET 只存 Makers 项目环境变量
@@ -197,19 +198,31 @@ async function handleApi(url, request, body, rt) {
   }
 
   // ---- config ----
+  // 敏感键 admin_pwd 一律脱敏：哈希永不出服务器（与"客户端无法读取"的开发规范一致）
   // GET /config
   if (segments[0] === 'config' && segments.length === 1 && request.method === 'GET') {
     const rows = await sql`SELECT key, value FROM config`
-    return ok(rows)
+    return ok(rows.filter((r) => r.key !== 'admin_pwd'))
   }
   // GET /config/:key
   if (segments[0] === 'config' && segments.length === 2 && request.method === 'GET') {
+    if (segments[1] === 'admin_pwd') return ok(null)
     const rows = await sql`SELECT value FROM config WHERE key = ${segments[1]} LIMIT 1`
     return ok(first(rows)?.value ?? null)
   }
   // PUT /config/:key（upsert）
   if (segments[0] === 'config' && segments.length === 2 && request.method === 'PUT') {
     const value = body?.value ?? null
+    // admin_pwd：空值不修改（保留原哈希）；非空用数据库侧 bcrypt 加密（pgcrypto.crypt，
+    //   Neon 独立 CPU，规避边缘函数 CPU 限制），与 login 校验的 crypt 逻辑一致
+    if (segments[1] === 'admin_pwd') {
+      if (value == null || value === '') return ok({ key: segments[1], value: null })
+      await sql`
+        INSERT INTO config (key, value) VALUES ('admin_pwd', crypt(${value}, gen_salt('bf', 10)))
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `
+      return ok({ key: segments[1], value: null })
+    }
     await sql`
       INSERT INTO config (key, value) VALUES (${segments[1]}, ${value})
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value

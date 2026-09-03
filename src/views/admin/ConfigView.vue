@@ -97,6 +97,23 @@
         </div>
       </div>
 
+      <!-- 自动获取设置 -->
+      <div class="bg-white rounded-lg shadow-sm p-6">
+        <h3 class="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">自动获取设置</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">获取名称 API 地址</label>
+            <input v-model="config.fetch_title_api" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://lianjie.hjke.cn/api/title?url={url}" />
+            <p class="text-xs text-gray-400 mt-1">支持 {url}（URL 编码）占位符，留空使用默认服务</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">获取图标 API 地址</label>
+            <input v-model="config.fetch_icon_api" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://a.favicon.im/{hostname}" />
+            <p class="text-xs text-gray-400 mt-1">支持 {hostname} / {url} 占位符，留空使用默认服务</p>
+          </div>
+        </div>
+      </div>
+
       <!-- 保存 -->
       <div class="flex justify-end">
         <button type="submit" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
@@ -135,6 +152,8 @@ const config = reactive<Record<string, string>>({
   admin_user: 'admin',
   admin_pwd: '',
   template: 'default',
+  fetch_title_api: 'https://lianjie.hjke.cn/api/title?url={url}',
+  fetch_icon_api: 'https://a.favicon.im/{hostname}',
 })
 
 const configKeys = Object.keys(config)
@@ -156,6 +175,8 @@ async function saveAll() {
   saving.value = true
   try {
     for (const key of configKeys) {
+      // admin_pwd 留空则不修改（服务端也只对非空值加密写入，避免覆盖已有哈希）
+      if (key === 'admin_pwd' && !config[key]) continue
       await services.config.set(key, config[key])
     }
     savedMsg.value = '配置已保存'

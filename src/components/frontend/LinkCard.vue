@@ -6,13 +6,13 @@
     class="glass-card flex flex-col items-center p-4 group"
     @click="$emit('click', link)"
   >
-    <!-- 图标区域 -->
-    <div class="w-10 h-10 mb-2 flex items-center justify-center">
+    <!-- 图标区域（白色圆角底衬，App 图标风格） -->
+    <div class="w-10 h-10 mb-2 rounded-xl bg-white shadow-sm flex items-center justify-center">
       <img
         v-if="isImageIcon && !imageError"
         :src="link.icon!"
         :alt="link.title"
-        class="w-10 h-10 object-contain"
+        class="w-8 h-8 object-contain"
         loading="lazy"
         decoding="async"
         @error="imageError = true"
@@ -24,8 +24,7 @@
       ></div>
       <div
         v-else
-        class="w-10 h-10 rounded-lg text-sm font-bold glass-text"
-        style="background: var(--glass-bg-strong); border: 1px solid var(--glass-border)"
+        class="w-4 h-4 rounded text-xs font-bold text-gray-500 bg-gray-100 flex items-center justify-center"
       >
         {{ link.title.charAt(0) }}
       </div>

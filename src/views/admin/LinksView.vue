@@ -232,6 +232,10 @@ const deleteTarget = ref<Link | null>(null)
 const batchText = ref('')
 const fetching = ref(false) // 添加链接时自动获取名称/图标中
 
+// 自动获取 API 地址（来自站点配置，留空回退默认值）
+const fetchTitleApi = ref('https://lianjie.hjke.cn/api/title?url={url}')
+const fetchIconApi = ref('https://a.favicon.im/{hostname}')
+
 // 死链检测结果弹窗
 const showCheckResult = ref(false)
 const checkSaving = ref(false)
@@ -321,16 +325,21 @@ async function autoFetch(force = false) {
     return // URL 非法时静默放弃
   }
 
-  // 1. 立即填充图标 URL（纯前端拼串，无需网络检查）
-  form.value.icon = `https://a.favicon.im/${hostname}`
+  // 1. 立即填充图标 URL（站点配置的 API 模板，纯前端拼串，无需网络检查）
+  form.value.icon = fetchIconApi.value
+    .replace(/\{hostname\}/g, hostname)
+    .replace(/\{url\}/g, encodeURIComponent(raw))
 
   fetching.value = true
   try {
-    // 2. 请求标题 API 获取名称
-    const resp = await fetch(`https://lianjie.hjke.cn/api/title?url=${encodeURIComponent(raw)}`)
+    // 2. 请求标题 API 获取名称（站点配置的 API 模板）
+    const apiUrl = fetchTitleApi.value
+      .replace(/\{url\}/g, encodeURIComponent(raw))
+      .replace(/\{hostname\}/g, hostname)
+    const resp = await fetch(apiUrl)
     if (!resp.ok) throw new Error('request failed')
     const json = await resp.json()
-    const name = json?.data?.title as string | undefined
+    const name = (json?.data?.title ?? json?.title ?? json?.name) as string | undefined
     if (name && (!form.value.title || force)) {
       form.value.title = name.trim()
     }
@@ -450,5 +459,16 @@ async function hideAllDead() {
   }
 }
 
-onMounted(loadData)
+async function loadFetchConfig() {
+  try {
+    const cfg = await services.config.getAll()
+    if (cfg.fetch_title_api) fetchTitleApi.value = cfg.fetch_title_api
+    if (cfg.fetch_icon_api) fetchIconApi.value = cfg.fetch_icon_api
+  } catch {}
+}
+
+onMounted(async () => {
+  await loadData()
+  await loadFetchConfig()
+})
 </script>

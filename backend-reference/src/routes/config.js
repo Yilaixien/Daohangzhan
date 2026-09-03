@@ -1,7 +1,11 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
+
+// 敏感键脱敏：admin_pwd 哈希永不出服务器
+const SENSITIVE_KEYS = new Set(['admin_pwd']);
 
 // GET /api/config — 获取所有配置（公开）
 router.get('/', async (req, res) => {
@@ -9,7 +13,9 @@ router.get('/', async (req, res) => {
     const pool = req.app.get('pool');
     const [rows] = await pool.query('SELECT `key`, `value` FROM `config`');
     const result = {};
-    rows.forEach(row => { result[row.key] = row.value || ''; });
+    rows.forEach(row => {
+      if (!SENSITIVE_KEYS.has(row.key)) result[row.key] = row.value || '';
+    });
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -20,6 +26,9 @@ router.get('/', async (req, res) => {
 // GET /api/config/:key — 获取单个配置
 router.get('/:key', async (req, res) => {
   try {
+    if (SENSITIVE_KEYS.has(req.params.key)) {
+      return res.json({ value: null });
+    }
     const pool = req.app.get('pool');
     const [rows] = await pool.query('SELECT `value` FROM `config` WHERE `key` = ?', [req.params.key]);
     if (rows.length === 0) {
@@ -37,7 +46,15 @@ router.put('/:key', auth, async (req, res) => {
   try {
     const pool = req.app.get('pool');
     const { key } = req.params;
-    const { value } = req.body;
+    let { value } = req.body;
+
+    // admin_pwd：空值不修改（保留原哈希）；非空先 bcrypt 加密再入库
+    if (key === 'admin_pwd') {
+      if (value == null || value === '') {
+        return res.json({ message: '保存成功' });
+      }
+      value = bcrypt.hashSync(value, 10);
+    }
 
     const [existing] = await pool.query('SELECT `key` FROM `config` WHERE `key` = ?', [key]);
 

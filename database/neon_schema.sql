@@ -267,7 +267,9 @@ INSERT INTO config (key, value, description) VALUES
   ('about_content', '<h3>关于本站</h3><p>感谢来访，本站致力于简洁高效的上网导航和搜索入口。</p>', '关于页面内容'),
   ('template', 'default', '当前模板'),
   ('admin_user', 'admin', '管理员账号'),
-  ('admin_pwd', '', '管理员密码 bcrypt 哈希（仅服务端校验，客户端无法读取）');
+  ('admin_pwd', '', '管理员密码 bcrypt 哈希（仅服务端校验，客户端无法读取）'),
+  ('fetch_title_api', 'https://lianjie.hjke.cn/api/title?url={url}', '自动获取网站名称 API（{url}=URL编码占位，留空用默认）'),
+  ('fetch_icon_api', 'https://a.favicon.im/{hostname}', '自动获取网站图标 API（{hostname}/{url} 占位，留空用默认）');
 
 -- ============================================
 -- 管理员凭据初始化（执行本文件的最后一步）

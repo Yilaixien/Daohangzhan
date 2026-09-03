@@ -172,6 +172,9 @@ const applyStatus = ref(0) // 0=关闭, 1=审核模式, 2=关闭
 const applyNotice = ref('')
 const categories = ref<Category[]>([])
 const fetching = ref(false)
+// 自动获取 API 地址（来自站点配置，留空回退默认值）
+const fetchTitleApi = ref('https://lianjie.hjke.cn/api/title?url={url}')
+const fetchIconApi = ref('https://a.favicon.im/{hostname}')
 const submitting = ref(false)
 const errorMsg = ref('')
 const successMsg = ref('')
@@ -209,6 +212,8 @@ onMounted(async () => {
     const applyVal = parseInt(config.apply || '0')
     applyStatus.value = applyVal
     applyNotice.value = config.apply_gg || ''
+    if (config.fetch_title_api) fetchTitleApi.value = config.fetch_title_api
+    if (config.fetch_icon_api) fetchIconApi.value = config.fetch_icon_api
   } catch {}
 
   try {
@@ -222,33 +227,41 @@ async function autoFetch() {
   if (!form.url || fetching.value) return
   fetching.value = true
   try {
-    // 尝试通过后端代理获取网站信息
-    // 前端无法直接跨域抓取，这里先做简单的 favicon 推断
+    const raw = form.url.startsWith('http') ? form.url : `https://${form.url}`
+    let hostname = ''
     try {
-      const urlObj = new URL(form.url.startsWith('http') ? form.url : `https://${form.url}`)
-      const faviconUrl = `${urlObj.origin}/favicon.ico`
-
-      // 检测 favicon 是否可访问
-      const img = new Image()
-      img.onload = () => {
-        form.icon = faviconUrl
-      }
-      img.src = faviconUrl
-
-      // 从域名推断网站名称
-      if (!form.name) {
-        const hostname = urlObj.hostname.replace('www.', '')
-        form.name = hostname.split('.')[0]
-      }
-
-      if (!form.url.startsWith('http')) {
-        form.url = urlObj.href
-      }
+      hostname = new URL(raw).hostname
     } catch {
       errorMsg.value = 'URL格式不正确'
+      return
+    }
+    if (!form.url.startsWith('http')) {
+      form.url = raw
+    }
+
+    // 图标：站点配置的 API 模板，纯前端拼 URL 直接填充
+    form.icon = fetchIconApi.value
+      .replace(/\{hostname\}/g, hostname)
+      .replace(/\{url\}/g, encodeURIComponent(raw))
+
+    // 名称：请求站点配置的名称 API（名称已填时跳过）
+    if (!form.name) {
+      try {
+        const apiUrl = fetchTitleApi.value
+          .replace(/\{url\}/g, encodeURIComponent(raw))
+          .replace(/\{hostname\}/g, hostname)
+        const resp = await fetch(apiUrl)
+        if (resp.ok) {
+          const json = await resp.json()
+          const name = json?.data?.title ?? json?.title ?? json?.name
+          if (name) form.name = String(name).trim()
+        }
+      } catch {
+        // 名称获取失败静默处理，由用户手填
+      }
     }
   } catch {
-    // 无法获取
+    errorMsg.value = 'URL格式不正确'
   } finally {
     fetching.value = false
   }
