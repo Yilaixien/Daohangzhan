@@ -75,9 +75,9 @@ async function verifyToken(request, rt) {
 }
 
 // ---------- 登录 ----------
-async function login(request, rt) {
+// body 由 handleRequest 统一解析后传入（request 流只能读一次，login 内不可再 request.json()）
+async function login(request, rt, body) {
   const { sql } = rt
-  const body = await request.json().catch(() => ({}))
   const { username, password } = body || {}
   const rows = await sql`SELECT key, value FROM config WHERE key IN ('admin_user','admin_pwd')`
   const cfg = {}
@@ -108,7 +108,7 @@ async function handleApi(url, request, body, rt) {
 
   // POST /api/auth/login（无需验签）
   if (url.pathname.replace(/\/+$/, '').endsWith('/auth/login') && request.method === 'POST') {
-    return login(request, rt)
+    return login(request, rt, body)
   }
 
   // 其余一律验签
