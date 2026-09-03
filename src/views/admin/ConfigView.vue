@@ -87,14 +87,10 @@
         <h3 class="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">抓取设置</h3>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">名称抓取 API</label>
-            <input v-model="config.fetch_name_api" type="text" placeholder="https://lianjie.hjke.cn/api/title?url={url}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">图标抓取 API</label>
             <input v-model="config.fetch_icon_api" type="text" placeholder="https://a.favicon.im/{hostname}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-          <p class="text-xs text-gray-400">「添加链接」自动获取名称与图标时使用。<br/>支持 <code class="bg-gray-100 px-1 rounded">{url}</code>（完整链接，自动编码）与 <code class="bg-gray-100 px-1 rounded">{hostname}</code>（域名）占位符；无占位符的地址将自动追加 <code class="bg-gray-100 px-1 rounded">?url=</code> 参数（名称接口取 <code class="bg-gray-100 px-1 rounded">data.title</code>，图标接口取 <code class="bg-gray-100 px-1 rounded">data.icon</code>）。</p>
+          <p class="text-xs text-gray-400">「添加链接」自动获取图标时使用。<br/>支持 <code class="bg-gray-100 px-1 rounded">{hostname}</code>（域名）与 <code class="bg-gray-100 px-1 rounded">{url}</code>（完整链接，自动编码）占位符；无占位符的地址将自动追加 <code class="bg-gray-100 px-1 rounded">?url=</code> 参数，接口取 <code class="bg-gray-100 px-1 rounded">data.icon</code>。</p>
         </div>
       </div>
 
@@ -149,7 +145,6 @@ const config = reactive<Record<string, string>>({
   apply: '1',
   apply_gg: '',
   about_content: '',
-  fetch_name_api: 'https://lianjie.hjke.cn/api/title?url={url}',
   fetch_icon_api: 'https://a.favicon.im/{hostname}',
   admin_user: 'admin',
   admin_pwd: '',

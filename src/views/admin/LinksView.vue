@@ -91,15 +91,15 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
             <div class="flex gap-2">
               <input v-model="form.url" type="url" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" @blur="autoFetch()" />
-              <button type="button" @click="autoFetch(true)" :disabled="fetching" class="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors whitespace-nowrap">
+              <button type="button" @click="autoFetch()" :disabled="fetching" class="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors whitespace-nowrap">
                 {{ fetching ? '获取中...' : '自动获取' }}
               </button>
             </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">名称 *</label>
-            <input v-model="form.title" type="text" required placeholder="输入链接后自动获取" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-            <p v-if="fetching" class="text-xs text-gray-400 mt-1">正在获取名称...</p>
+            <input v-model="form.title" type="text" required placeholder="请输入网站名称" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <p v-if="fetching" class="text-xs text-gray-400 mt-1">正在获取图标...</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">分组 *</label>
@@ -214,10 +214,8 @@ import { ref, computed, onMounted } from 'vue'
 import { services } from '@/services'
 import type { Link, Category } from '@/services/contracts'
 
-// 自动获取名称/图标的默认 API（可在「站点配置 → 抓取设置」中单独覆盖）
-const DEFAULT_FETCH_NAME_API = 'https://lianjie.hjke.cn/api/title?url={url}'
+// 自动获取图标的默认 API（可在「站点配置 → 抓取设置」中覆盖）
 const DEFAULT_FETCH_ICON_API = 'https://a.favicon.im/{hostname}'
-const fetchNameApi = ref(DEFAULT_FETCH_NAME_API)
 const fetchIconApi = ref(DEFAULT_FETCH_ICON_API)
 
 const links = ref<Link[]>([])
@@ -288,8 +286,7 @@ async function loadData() {
     ])
     links.value = allLinks
     categories.value = allCats
-    // 抓取 API 地址来自站点配置（未配置时使用默认值）
-    if (allConfig.fetch_name_api) fetchNameApi.value = allConfig.fetch_name_api
+    // 图标抓取 API 地址来自站点配置（未配置时使用默认值）
     if (allConfig.fetch_icon_api) fetchIconApi.value = allConfig.fetch_icon_api
   } catch {} finally {
     loading.value = false
@@ -328,18 +325,14 @@ function resolveFetchUrl(template: string, rawUrl: string, hostname: string): st
   return `${tpl}${sep}url=${encodeURIComponent(rawUrl)}`
 }
 
-// 宽容解析接口返回：名称取 data.title ?? title ?? name；图标取 data.icon ?? icon
-function pickTitle(json: any): string | undefined {
-  const v = json?.data?.title ?? json?.title ?? json?.name
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined
-}
+// 宽容解析接口返回：图标取 data.icon ?? icon
 function pickIcon(json: any): string | undefined {
   const v = json?.data?.icon ?? json?.icon
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
-// 输入链接后自动获取名称与图标（仅添加模式生效；force 为 true 时强制覆盖已填名称）
-async function autoFetch(force = false) {
+// 输入链接后自动获取图标（仅添加模式生效）
+async function autoFetch() {
   if (editingLink.value || fetching.value) return
   let raw = form.value.url.trim()
   if (!raw) return
@@ -354,7 +347,7 @@ async function autoFetch(force = false) {
     return // URL 非法时静默放弃
   }
 
-  // 1. 图标：占位符模板直接拼串立即填充（无需网络）；否则视为 JSON 接口请求解析，失败回退默认模板
+  // 图标：占位符模板直接拼串立即填充（无需网络）；否则视为 JSON 接口请求解析，失败回退默认模板
   const iconTpl = fetchIconApi.value || DEFAULT_FETCH_ICON_API
   if (iconTpl.includes('{url}') || iconTpl.includes('{hostname}')) {
     form.value.icon = iconTpl
@@ -370,27 +363,12 @@ async function autoFetch(force = false) {
       }
     } catch {
       // 图标接口失败不中断，走默认模板兜底
+    } finally {
+      fetching.value = false
     }
     if (!form.value.icon) {
       form.value.icon = DEFAULT_FETCH_ICON_API.replace(/\{hostname\}/g, hostname)
     }
-  }
-
-  fetching.value = true
-  try {
-    // 2. 请求名称 API（站点可配置）获取名称
-    const nameTpl = fetchNameApi.value || DEFAULT_FETCH_NAME_API
-    const resp = await fetch(resolveFetchUrl(nameTpl, raw, hostname))
-    if (!resp.ok) throw new Error('request failed')
-    const json = await resp.json()
-    const name = pickTitle(json)
-    if (name && (!form.value.title || force)) {
-      form.value.title = name
-    }
-  } catch {
-    // 获取失败静默处理：名称留空由用户手填，不影响保存
-  } finally {
-    fetching.value = false
   }
 }
 
