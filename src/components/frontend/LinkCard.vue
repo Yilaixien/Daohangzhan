@@ -7,15 +7,15 @@
     @click="$emit('click', link)"
   >
     <!-- 图标区域：白底圆角底衬，使图标呈现类手机 App 的统一风格 -->
-    <div class="w-10 h-10 mb-2 flex items-center justify-center">
+    <div class="w-12 h-12 mb-3 flex items-center justify-center">
       <div
         v-if="isImageIcon && !imageError"
-        class="w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center overflow-hidden"
+        class="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center overflow-hidden"
       >
         <img
           :src="link.icon!"
           :alt="link.title"
-          class="w-6 h-6 object-contain"
+          class="w-8 h-8 object-contain"
           loading="lazy"
           decoding="async"
           @error="imageError = true"
@@ -23,12 +23,12 @@
       </div>
       <div
         v-else-if="link.icon && !isImageIcon"
-        class="w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center text-2xl group-hover:scale-110 transition-transform overflow-hidden"
+        class="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-3xl group-hover:scale-110 transition-transform overflow-hidden"
         v-html="link.icon"
       ></div>
       <div
         v-else
-        class="w-8 h-8 rounded-lg text-sm font-bold glass-text"
+        class="w-10 h-10 rounded-xl text-base font-bold glass-text"
         style="background: var(--glass-bg-strong); border: 1px solid var(--glass-border)"
       >
         {{ link.title.charAt(0) }}

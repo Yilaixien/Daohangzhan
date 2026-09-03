@@ -34,7 +34,7 @@
               class="rounded-lg p-4 flex flex-col items-center"
               style="background: var(--glass-bg); border: 1px solid var(--glass-border)"
             >
-              <div class="w-10 h-10 rounded-lg mb-2" style="background: var(--glass-bg-strong)"></div>
+              <div class="w-12 h-12 rounded-xl mb-3" style="background: var(--glass-bg-strong)"></div>
               <div class="h-3 rounded w-12" style="background: var(--glass-bg-strong)"></div>
             </div>
           </div>
