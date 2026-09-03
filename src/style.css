@@ -201,27 +201,79 @@
   color: var(--glass-text);
 }
 
-/* ============ 滚动中降级（仅触摸设备）============ */
-/* 低端手机滚动期间逐帧重算 backdrop-filter 是卡顿/延迟主因；滚动中模糊本就难以察觉，
-   停滞后立即恢复完整毛玻璃，外观基本无感。桌面端（hover 设备）不受影响，始终全效。 */
-@media (hover: none) {
-  html[data-scrolling] .glass,
-  html[data-scrolling] .glass-card,
-  html[data-scrolling] .glass-strong,
-  html[data-scrolling] .glass-strip,
-  html[data-scrolling] .glass-chip,
-  html[data-scrolling] .btn-glass,
-  html[data-scrolling] .search-glass {
-    backdrop-filter: none;
-  }
-  /* 无模糊时提升一点不透明度保持"玻璃"质感，并暂停过渡避免反复切换闪烁 */
-  html[data-scrolling] .glass-chip,
-  html[data-scrolling] .btn-glass {
-    background: rgba(255, 255, 255, 0.22);
-    transition: none;
-  }
-  html[data-scrolling] .search-glass {
-    background: rgba(255, 255, 255, 0.34);
-    transition: none;
-  }
+/* ============ 滚动中降级（所有设备，PC 低配收益最大）============ */
+/* 滚动期间逐帧重算 backdrop-filter 是卡顿/延迟主因；滚动中模糊本就难以察觉，
+   滚动停止（150ms 无事件或 scrollend）后立即恢复完整毛玻璃，外观基本无感。 */
+html[data-scrolling] .glass,
+html[data-scrolling] .glass-card,
+html[data-scrolling] .glass-strong,
+html[data-scrolling] .glass-strip,
+html[data-scrolling] .glass-chip,
+html[data-scrolling] .btn-glass,
+html[data-scrolling] .search-glass {
+  backdrop-filter: none;
+}
+/* 无模糊时提升一点不透明度保持"玻璃"质感，并暂停过渡避免反复切换闪烁 */
+html[data-scrolling] .glass-chip,
+html[data-scrolling] .btn-glass {
+  background: rgba(255, 255, 255, 0.22);
+  transition: none;
+}
+html[data-scrolling] .search-glass {
+  background: rgba(255, 255, 255, 0.34);
+  transition: none;
+}
+
+/* ============ 低配置环境静态降级（html[data-low-end]）============ */
+/* 参考 lylme_spage：高不透明度半透明底 + 无 backdrop-filter，弱 GPU 零模糊成本；
+   高性能 PC 不命中该标记，保持完整毛玻璃。 */
+html[data-low-end] {
+  --glass-blur: 10px;
+  --glass-bg: rgba(255, 255, 255, 0.45);
+  --glass-bg-strong: rgba(255, 255, 255, 0.6);
+  --glass-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+html[data-low-end][data-theme='dark'] {
+  --glass-bg: rgba(10, 16, 40, 0.62);
+  --glass-bg-strong: rgba(10, 16, 40, 0.75);
+}
+
+html[data-low-end] .glass,
+html[data-low-end] .glass-card,
+html[data-low-end] .glass-strong,
+html[data-low-end] .glass-strip,
+html[data-low-end] .glass-chip,
+html[data-low-end] .btn-glass,
+html[data-low-end] .search-glass {
+  backdrop-filter: none;
+}
+
+html[data-low-end] .glass-chip,
+html[data-low-end] .btn-glass {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+html[data-low-end][data-theme='dark'] .glass-chip,
+html[data-low-end][data-theme='dark'] .btn-glass {
+  background: rgba(10, 16, 40, 0.55);
+}
+
+html[data-low-end] .search-glass {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+html[data-low-end][data-theme='dark'] .search-glass {
+  background: rgba(10, 16, 40, 0.68);
+}
+
+/* 低配下保留选中态高亮（优先于上面的统一底色） */
+html[data-low-end] .glass-chip.active,
+html[data-low-end] .glass-chip[data-active='true'] {
+  background: var(--glass-selected);
+}
+
+/* 低配下卡片 hover 仅变色，不做 transform scale（参考项目做法） */
+html[data-low-end] .glass-card:hover {
+  transform: none;
 }
