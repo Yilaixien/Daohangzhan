@@ -107,7 +107,7 @@ npm run build
    - 构建变量（内联进前端 bundle）：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`（nav_read）、`VITE_API_BASE_URL=/api`
    - 函数变量（仅函数经 `context.env` 读取）：`DATABASE_URL_ADMIN`（nav_admin）、`JWT_SECRET`（≥32 字符随机串）
    - 旧的 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 已废弃，删除
-4. 构建：`npm run build`（产物 `dist/` 内已自包含 `edge-functions/api/[[default]].js` 与函数依赖清单 `edge-functions/package.json`）。
+4. 构建：`npm run build`——脚本内置于首步执行 `npm ci` **全新安装依赖**（严格按 `package-lock.json`，杜绝缓存旧依赖），再 `vue-tsc` 类型检查、`vite build`，并自动把 `edge-functions/` 与函数依赖清单复制进 `dist/` 使其自包含。
 5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台）。函数由平台打包：**jose / bcryptjs 同时声明在根 `package.json` 与 `edge-functions/package.json`**（平台以仓库根 `node_modules` 打包函数，子目录不单独安装依赖；这两包未被前端 import，不会进入前端 bundle）。
 6. 配置要点：输出目录 `dist`、构建命令 `npm run build`、**无需 SPA fallback**（Hash 路由，`#` 后路径由前端处理）。
 

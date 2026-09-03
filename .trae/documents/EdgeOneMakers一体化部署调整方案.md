@@ -74,10 +74,10 @@ function getRuntime(env) {
 **[edge-functions/package.json](file:///workspace/edge-functions/package.json)**：声明函数依赖（jose / bcryptjs / @neondatabase/serverless）。
 **[package.json](file:///workspace/package.json)**（根）：
 - `dependencies` **同时**声明 `jose` / `bcryptjs`（与 edge-functions/package.json 一致）。原因（线上构建实测）：Makers 平台以**仓库根 node_modules** 打包函数，并不会为 `edge-functions/` 子目录单独安装依赖；若只写在函数目录，打包报 `Could not resolve "jose"/"bcryptjs"` 并回退为纯静态站点（无函数路由）。这两包不被前端 import，Vite 不会打入前端产物，不影响前端体积与构建。
-- `build` 脚本：纯构建 + 产物自包含：
+- `build` 脚本：**`npm ci` 全新安装**（严格按 lockfile 重装，保证云端/本地每次都能解析函数依赖 jose/bcryptjs，杜绝缓存旧 node_modules）+ 纯构建 + 产物自包含：
 
 ```json
-"build": "vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json"
+"build": "npm ci && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json"
 ```
 
 （`cp -r edge-functions dist/edge-functions` 已含 `package.json`；末句为显式声明，幂等无害。）产物 `dist/` 内函数目录自包含，`edgeone makers deploy ./dist` 即可被平台识别并按其 `edge-functions/package.json` 安装函数依赖。
