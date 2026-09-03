@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm ci && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json",
+    "build": "npm ci && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json && mkdir -p dist/edge-functions/node_modules/@neondatabase && cp -r node_modules/jose node_modules/bcryptjs dist/edge-functions/node_modules/ && cp -r node_modules/@neondatabase/serverless dist/edge-functions/node_modules/@neondatabase/",
     "preview": "vite preview"
   },
   "dependencies": {

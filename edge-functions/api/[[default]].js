@@ -37,8 +37,11 @@ const CORS_HEADERS = {
 // ---------- 运行时（按值缓存, 全局单例） ----------
 const runtimeCache = new Map()
 function getRuntime(env) {
-  const dbUrl = env?.DATABASE_URL_ADMIN || process.env?.DATABASE_URL_ADMIN
-  const jwtSecret = env?.JWT_SECRET || process.env?.JWT_SECRET
+  // 兼容 Makers context.env（线上）与本地 Node 调试（process.env）。
+  // 边缘运行时无 process 全局，必须先 typeof 保护，否则直接 ReferenceError
+  const read = (key) => env?.[key] || (typeof process !== 'undefined' ? process.env?.[key] : undefined)
+  const dbUrl = read('DATABASE_URL_ADMIN')
+  const jwtSecret = read('JWT_SECRET')
   const cacheKey = `${dbUrl}::${jwtSecret}`
   if (!runtimeCache.has(cacheKey)) {
     if (!dbUrl || !jwtSecret) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
