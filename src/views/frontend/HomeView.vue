@@ -1,12 +1,9 @@
 <template>
   <FrontendLayout>
     <!-- 首屏顶部留白区（日期时间 + 顶部留白，链接无需滚动即可见） -->
-    <section class="relative px-4 sm:px-6 pt-28 sm:pt-32 pb-4">
-      <!-- 右上日期时间（向下滚动后整体淡出，日期随之消失） -->
-      <div
-        class="fixed top-5 right-5 sm:right-7 z-40 transition-all duration-500 select-none pointer-events-none"
-        :class="scrolled ? 'opacity-0 -translate-y-4' : 'opacity-100'"
-      >
+    <section class="relative px-4 sm:px-6 pt-14 sm:pt-16 pb-4">
+      <!-- 右上日期时间（恒显，不随滚动变化） -->
+      <div class="fixed top-5 right-5 sm:right-7 z-40 select-none pointer-events-none">
         <DateTimeDisplay />
       </div>
     </section>
@@ -20,15 +17,6 @@
         @search="store.doSearch"
         @change-engine="store.setCurrentEngine"
       />
-      <!-- 吸顶小时间：时间不消失，始终可见 -->
-      <Transition name="fade">
-        <span
-          v-if="scrolled"
-          class="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 glass-text font-semibold text-sm tracking-[0.25em] tabular-nums"
-        >
-          {{ timeStr }}
-        </span>
-      </Transition>
     </div>
 
     <!-- 下方内容区 -->
@@ -94,7 +82,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useHomeStore } from '@/stores/home'
-import { useDateTime } from '@/composables/useDateTime'
 import { useScroll } from '@/composables/useScroll'
 import FrontendLayout from './FrontendLayout.vue'
 import SearchBox from '@/components/frontend/SearchBox.vue'
@@ -103,7 +90,6 @@ import DateTimeDisplay from '@/components/frontend/DateTimeDisplay.vue'
 import BackToTop from '@/components/frontend/BackToTop.vue'
 
 const store = useHomeStore()
-const { timeStr } = useDateTime()
 const { scrollY } = useScroll()
 
 const shellRef = ref<HTMLElement | null>(null)
@@ -149,16 +135,5 @@ onUnmounted(() => {
 /* 吸顶态：变通栏（平滑过渡），无背景/分隔线/投影，只留搜索胶囊悬浮 */
 .search-shell.stuck {
   max-width: none;
-}
-
-/* 吸顶小时间淡入淡出 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.25s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>
