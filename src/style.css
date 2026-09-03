@@ -17,6 +17,8 @@
   --glass-text: #ffffff;
   --glass-text-soft: rgba(255, 255, 255, 0.78);
   --glass-text-faint: rgba(255, 255, 255, 0.55);
+  /* 白字可读性投影（浅色背景图/关闭磨砂时仍清晰；默认暗背景上几乎不可见） */
+  --glass-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 8px rgba(0, 0, 0, 0.18);
 
   /* 页面渐变兜底背景（浅色：深邃蓝紫极光） */
   --page-bg-1: #1e2a78;
@@ -37,6 +39,8 @@
   --glass-text: #ffffff;
   --glass-text-soft: rgba(255, 255, 255, 0.78);
   --glass-text-faint: rgba(255, 255, 255, 0.5);
+  /* 白字可读性投影（浅色背景图/关闭磨砂时仍清晰；默认暗背景上几乎不可见） */
+  --glass-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 8px rgba(0, 0, 0, 0.2);
 
   /* 页面渐变兜底背景（深色：近黑深蓝） */
   --page-bg-1: #050816;
@@ -111,6 +115,7 @@
   padding: 0 14px;
   font-size: 13px;
   color: var(--glass-text-soft);
+  text-shadow: var(--glass-text-shadow);
   /* 默认磨砂态 */
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -147,6 +152,7 @@
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(30px);
+  text-shadow: var(--glass-text-shadow);
   transition: background 0.25s ease, border-color 0.25s ease,
     backdrop-filter 0.25s ease;
 }
@@ -164,6 +170,7 @@
   border-radius: 16px;
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(30px);
+  text-shadow: var(--glass-text-shadow); /* 继承给输入文字，保证浅色图上可读 */
 }
 
 /* 搜索输入 */
@@ -178,17 +185,20 @@
   color: var(--glass-text-soft);
 }
 
-/* 玻璃文字 */
+/* 玻璃文字（统一投影托底，保证浅色背景图/关闭磨砂时白字可读） */
 .glass-text {
   color: var(--glass-text);
+  text-shadow: var(--glass-text-shadow);
 }
 
 .glass-text-soft {
   color: var(--glass-text-soft);
+  text-shadow: var(--glass-text-shadow);
 }
 
 .glass-text-faint {
   color: var(--glass-text-faint);
+  text-shadow: var(--glass-text-shadow);
 }
 
 /* 链接 hover */

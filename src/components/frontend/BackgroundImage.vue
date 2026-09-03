@@ -25,8 +25,8 @@
       :style="{ backgroundImage: `url(${bgUrl})` }"
     ></div>
 
-    <!-- 有图时加深蒙层保证白字可读 -->
-    <div v-if="bgUrl" class="absolute inset-0" style="background: rgba(10, 15, 40, 0.35)"></div>
+    <!-- 有图时加深蒙层保证白字可读（浅色图也能托底对比度） -->
+    <div v-if="bgUrl" class="absolute inset-0" style="background: rgba(10, 15, 40, 0.45)"></div>
   </div>
 </template>
 
