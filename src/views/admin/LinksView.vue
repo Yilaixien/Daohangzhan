@@ -214,6 +214,12 @@ import { ref, computed, onMounted } from 'vue'
 import { services } from '@/services'
 import type { Link, Category } from '@/services/contracts'
 
+// 自动获取名称/图标的默认 API（可在「站点配置 → 抓取设置」中单独覆盖）
+const DEFAULT_FETCH_NAME_API = 'https://lianjie.hjke.cn/api/title?url={url}'
+const DEFAULT_FETCH_ICON_API = 'https://a.favicon.im/{hostname}'
+const fetchNameApi = ref(DEFAULT_FETCH_NAME_API)
+const fetchIconApi = ref(DEFAULT_FETCH_ICON_API)
+
 const links = ref<Link[]>([])
 const categories = ref<Category[]>([])
 const loading = ref(true)
@@ -275,12 +281,16 @@ function isImageIcon(icon: string | null): boolean {
 async function loadData() {
   loading.value = true
   try {
-    const [allLinks, allCats] = await Promise.all([
+    const [allLinks, allCats, allConfig] = await Promise.all([
       services.links.getAll(),
       services.categories.getAll(),
+      services.config.getAll(),
     ])
     links.value = allLinks
     categories.value = allCats
+    // 抓取 API 地址来自站点配置（未配置时使用默认值）
+    if (allConfig.fetch_name_api) fetchNameApi.value = allConfig.fetch_name_api
+    if (allConfig.fetch_icon_api) fetchIconApi.value = allConfig.fetch_icon_api
   } catch {} finally {
     loading.value = false
   }
@@ -305,6 +315,29 @@ function openEdit(link: Link) {
   showForm.value = true
 }
 
+// 渲染抓取 API 的 URL 模板：{url}（完整链接，自动编码）与 {hostname}（域名）占位符；
+// 模板无占位符时视为接口根地址，自动追加 ?url= 参数。
+function resolveFetchUrl(template: string, rawUrl: string, hostname: string): string {
+  const tpl = template || ''
+  if (tpl.includes('{url}') || tpl.includes('{hostname}')) {
+    return tpl
+      .replace(/\{url\}/g, encodeURIComponent(rawUrl))
+      .replace(/\{hostname\}/g, hostname)
+  }
+  const sep = tpl.includes('?') ? '&' : '?'
+  return `${tpl}${sep}url=${encodeURIComponent(rawUrl)}`
+}
+
+// 宽容解析接口返回：名称取 data.title ?? title ?? name；图标取 data.icon ?? icon
+function pickTitle(json: any): string | undefined {
+  const v = json?.data?.title ?? json?.title ?? json?.name
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+function pickIcon(json: any): string | undefined {
+  const v = json?.data?.icon ?? json?.icon
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
 // 输入链接后自动获取名称与图标（仅添加模式生效；force 为 true 时强制覆盖已填名称）
 async function autoFetch(force = false) {
   if (editingLink.value || fetching.value) return
@@ -321,18 +354,38 @@ async function autoFetch(force = false) {
     return // URL 非法时静默放弃
   }
 
-  // 1. 立即填充图标 URL（纯前端拼串，无需网络检查）
-  form.value.icon = `https://a.favicon.im/${hostname}`
+  // 1. 图标：占位符模板直接拼串立即填充（无需网络）；否则视为 JSON 接口请求解析，失败回退默认模板
+  const iconTpl = fetchIconApi.value || DEFAULT_FETCH_ICON_API
+  if (iconTpl.includes('{url}') || iconTpl.includes('{hostname}')) {
+    form.value.icon = iconTpl
+      .replace(/\{url\}/g, encodeURIComponent(raw))
+      .replace(/\{hostname\}/g, hostname)
+  } else {
+    fetching.value = true
+    try {
+      const resp = await fetch(resolveFetchUrl(iconTpl, raw, hostname))
+      if (resp.ok) {
+        const iconUrl = pickIcon(await resp.json())
+        if (iconUrl) form.value.icon = iconUrl
+      }
+    } catch {
+      // 图标接口失败不中断，走默认模板兜底
+    }
+    if (!form.value.icon) {
+      form.value.icon = DEFAULT_FETCH_ICON_API.replace(/\{hostname\}/g, hostname)
+    }
+  }
 
   fetching.value = true
   try {
-    // 2. 请求标题 API 获取名称
-    const resp = await fetch(`https://lianjie.hjke.cn/api/title?url=${encodeURIComponent(raw)}`)
+    // 2. 请求名称 API（站点可配置）获取名称
+    const nameTpl = fetchNameApi.value || DEFAULT_FETCH_NAME_API
+    const resp = await fetch(resolveFetchUrl(nameTpl, raw, hostname))
     if (!resp.ok) throw new Error('request failed')
     const json = await resp.json()
-    const name = json?.data?.title as string | undefined
+    const name = pickTitle(json)
     if (name && (!form.value.title || force)) {
-      form.value.title = name.trim()
+      form.value.title = name
     }
   } catch {
     // 获取失败静默处理：名称留空由用户手填，不影响保存

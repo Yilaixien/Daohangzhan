@@ -6,20 +6,24 @@
     class="glass-card flex flex-col items-center p-4 group"
     @click="$emit('click', link)"
   >
-    <!-- 图标区域 -->
+    <!-- 图标区域：白底圆角底衬，使图标呈现类手机 App 的统一风格 -->
     <div class="w-10 h-10 mb-2 flex items-center justify-center">
-      <img
+      <div
         v-if="isImageIcon && !imageError"
-        :src="link.icon!"
-        :alt="link.title"
-        class="w-8 h-8 object-contain"
-        loading="lazy"
-        decoding="async"
-        @error="imageError = true"
-      />
+        class="w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center overflow-hidden"
+      >
+        <img
+          :src="link.icon!"
+          :alt="link.title"
+          class="w-6 h-6 object-contain"
+          loading="lazy"
+          decoding="async"
+          @error="imageError = true"
+        />
+      </div>
       <div
         v-else-if="link.icon && !isImageIcon"
-        class="text-2xl group-hover:scale-110 transition-transform"
+        class="w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center text-2xl group-hover:scale-110 transition-transform overflow-hidden"
         v-html="link.icon"
       ></div>
       <div

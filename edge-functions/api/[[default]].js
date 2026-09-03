@@ -64,6 +64,13 @@ function fail(message, status = 400) {
 
 const first = (rows) => (Array.isArray(rows) && rows.length ? rows[0] : undefined)
 
+// bcrypt 哈希识别：$2a/$2b/$2y + 成本 + 53 位盐密文（共 60 字符）。
+// 用于 PUT /config/admin_pwd 时避免对已哈希值二次哈希。
+const isBcryptHash = (v) => typeof v === 'string' && /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(v)
+
+// 配置读出口统一屏蔽敏感键 admin_pwd（密码哈希永不回显）
+const maskConfigKey = (key, value) => (key === 'admin_pwd' ? '' : value ?? '')
+
 async function verifyToken(request, rt) {
   const auth = request.headers.get('Authorization') || ''
   if (!auth.startsWith('Bearer ')) return null
@@ -197,21 +204,41 @@ async function handleApi(url, request, body, rt) {
   }
 
   // ---- config ----
-  // GET /config
+  // GET /config（列表，admin_pwd 屏蔽）
   if (segments[0] === 'config' && segments.length === 1 && request.method === 'GET') {
     const rows = await sql`SELECT key, value FROM config`
-    return ok(rows)
+    return ok(rows.map((row) => ({ key: row.key, value: maskConfigKey(row.key, row.value) })))
   }
-  // GET /config/:key
+  // GET /config/:key（admin_pwd 不回显）
   if (segments[0] === 'config' && segments.length === 2 && request.method === 'GET') {
+    if (segments[1] === 'admin_pwd') return ok(null)
     const rows = await sql`SELECT value FROM config WHERE key = ${segments[1]} LIMIT 1`
     return ok(first(rows)?.value ?? null)
   }
-  // PUT /config/:key（upsert）
+  // PUT /config/:key（upsert；admin_pwd 安全特判：留空不修改、明文转为数据库侧 pgcrypto bcrypt 哈希）
   if (segments[0] === 'config' && segments.length === 2 && request.method === 'PUT') {
+    const key = segments[1]
     const value = body?.value ?? null
+    if (key === 'admin_pwd') {
+      const trimmed = typeof value === 'string' ? value.trim() : ''
+      if (!trimmed) return ok({ key, value: null }) // 留空则不修改
+      if (isBcryptHash(trimmed)) {
+        // 已是 bcrypt 哈希（如重复保存），原样入库避免二次哈希
+        await sql`
+          INSERT INTO config (key, value) VALUES ('admin_pwd', ${trimmed})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        `
+        return ok({ key, value: null })
+      }
+      // 明文 → 数据库侧 pgcrypto 哈希（Neon 独立 CPU，规避边缘函数 200ms CPU 限制；成本固定 10）
+      await sql`
+        INSERT INTO config (key, value) VALUES ('admin_pwd', crypt(${trimmed}, gen_salt('bf', 10)))
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `
+      return ok({ key, value: null })
+    }
     await sql`
-      INSERT INTO config (key, value) VALUES (${segments[1]}, ${value})
+      INSERT INTO config (key, value) VALUES (${key}, ${value})
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
     `
     return ok({ key: segments[1], value })
