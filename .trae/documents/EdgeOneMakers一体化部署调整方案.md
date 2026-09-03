@@ -71,13 +71,10 @@ function getRuntime(env) {
 - **删除**旧 `edge-functions/index.js`（避免平台为容器外的 `index.js` 生成根路由 `example.com/` 干扰静态首页）。
 
 ### 3.2 函数依赖与构建产物
-
-**[edge-functions/package.json](file:///workspace/edge-functions/package.json)**：保留并作为**函数依赖的唯一声明来源**（jose / bcryptjs / @neondatabase/serverless），Makers 平台构建/部署时读取该文件为函数安装依赖——**根 package.json 不新增 jose/bcryptjs**。
+**[edge-functions/package.json](file:///workspace/edge-functions/package.json)**：声明函数依赖（jose / bcryptjs / @neondatabase/serverless）。
 **[package.json](file:///workspace/package.json)**（根）：
-
-- `dependencies` **保持不变**（不含 jose/bcryptjs，避免干扰前端模块解析）。
-
-- `build` 脚本**去掉** **`rm -rf node_modules package-lock.json && npm install`**（会反复清空重装依赖，且在新依赖进根 package.json 时导致 Vite 模块解析路径变化报错），改为纯构建 + 产物自包含：
+- `dependencies` **同时**声明 `jose` / `bcryptjs`（与 edge-functions/package.json 一致）。原因（线上构建实测）：Makers 平台以**仓库根 node_modules** 打包函数，并不会为 `edge-functions/` 子目录单独安装依赖；若只写在函数目录，打包报 `Could not resolve "jose"/"bcryptjs"` 并回退为纯静态站点（无函数路由）。这两包不被前端 import，Vite 不会打入前端产物，不影响前端体积与构建。
+- `build` 脚本：纯构建 + 产物自包含：
 
 ```json
 "build": "vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json"
@@ -132,7 +129,7 @@ VITE_API_BASE_URL=/api
 
 - 前端 `apiFetch` 路径与函数路由天然对齐（`/auth/login`、`/links` 等均在 `edge-functions/api/[[default]].js` 分发逻辑内），**业务契约与路由表不变**。
 
-- Makers 平台读取 `edge-functions/package.json` 为函数安装第三方依赖（用户确认）；执行期仍以 `edgeone makers dev`/`deploy` 实测复核，但根依赖不再承载函数依赖。
+- Makers 平台以**仓库根 node_modules** 打包函数（实测修正）：`jose`/`bcryptjs` 需同时声明在根 package.json 与 edge-functions/package.json；执行期仍以 `edgeone makers dev`/`deploy` 实测复核。
 
 - `rest`（MySQL 参考后端）模式不受影响；`VITE_BACKEND`/`VITE_NEON_DATABASE_URL` 构建期用法不变。
 
@@ -154,8 +151,8 @@ VITE_API_BASE_URL=/api
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | -------------------------------------------------------- |
 | [edge-functions/api/\[\[default\]\].js](file:///workspace/edge-functions/api/\[\[default]].js)   | 新增（函数逻辑 + `onRequest(context)` 适配 + `context.env` 惰性注入）                        | 符合 Makers 文件系统路由，函数随项目部署                                 |
 | [edge-functions/index.js](file:///workspace/edge-functions/index.js)                             | 删除                                                                             | 避免生成干扰静态首页的根路由；逻辑迁入新入口                                   |
-| [edge-functions/package.json](file:///workspace/edge-functions/package.json)                     | 保留，作为函数依赖唯一声明来源                                                                | 平台据此为函数安装 jose/bcryptjs/@neondatabase/serverless；根依赖不再承载 |
-| [package.json](file:///workspace/package.json)                                                   | build 脚本去掉 `rm -rf node_modules && npm install`，追加复制函数目录进 dist；dependencies 不变 | 消除重装隐患，产物自包含；前端依赖/体积不受影响                                 |
+| [edge-functions/package.json](file:///workspace/edge-functions/package.json)                     | 保留，声明函数依赖（jose / bcryptjs / @neondatabase/serverless）                      | 函数目录内自描述，供本地/平台参考 |
+| [package.json](file:///workspace/package.json)                                                   | build 脚本去掉 `rm -rf node_modules && npm install`，追加复制函数目录进 dist；`dependencies` 增加 `jose`/`bcryptjs` | 消除重装隐患，产物自包含；函数打包依赖可被平台解析（前端不 import 这两包，不影响前端体积） |
 | [src/services/neon/index.ts](file:///workspace/src/services/neon/index.ts#L16-L18)               | `apiBase` 默认 `/api`                                                            | Makers 同域路由，消除跨域；保留环境变量覆盖                                |
 | [.env.example](file:///workspace/.env.example)                                                   | `VITE_API_BASE_URL=/api` + 说明                                                  | 同域部署示例                                                   |
 | [README.md](file:///workspace/README.md)                                                         | 部署指南重构为单 Makers 项目；路由/环境变量/结构树同步                                               | 使用指南与现状一致                                                |

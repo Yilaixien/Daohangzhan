@@ -108,7 +108,7 @@ npm run build
    - 函数变量（仅函数经 `context.env` 读取）：`DATABASE_URL_ADMIN`（nav_admin）、`JWT_SECRET`（≥32 字符随机串）
    - 旧的 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 已废弃，删除
 4. 构建：`npm run build`（产物 `dist/` 内已自包含 `edge-functions/api/[[default]].js` 与函数依赖清单 `edge-functions/package.json`）。
-5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台；Makers 会读取 `edge-functions/package.json` 为函数安装 jose/bcryptjs/@neondatabase/serverless）。
+5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台）。函数由平台打包：**jose / bcryptjs 同时声明在根 `package.json` 与 `edge-functions/package.json`**（平台以仓库根 `node_modules` 打包函数，子目录不单独安装依赖；这两包未被前端 import，不会进入前端 bundle）。
 6. 配置要点：输出目录 `dist`、构建命令 `npm run build`、**无需 SPA fallback**（Hash 路由，`#` 后路径由前端处理）。
 
 **本地开发调试（函数 + 前端同源）：** `edgeone makers dev`（默认 8088 端口同时提供函数服务与前端，`VITE_API_BASE_URL=/api` 同域调用，无跨域；`edgeone makers link` 可将控制台环境变量同步到本地）。
