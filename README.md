@@ -106,7 +106,6 @@ npm run build
 3. 控制台配置**项目环境变量**：
    - 构建变量（内联进前端 bundle）：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`（nav_read）、`VITE_API_BASE_URL=/api`
    - 函数变量（仅函数经 `context.env` 读取）：`DATABASE_URL_ADMIN`（nav_admin）、`JWT_SECRET`（≥32 字符随机串）
-   - 旧的 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 已废弃，删除
 4. 构建：`npm run build`——脚本内置于首步执行 `npm ci` **全新安装依赖**（严格按 `package-lock.json`，杜绝缓存旧依赖），再 `vue-tsc` 类型检查、`vite build`，并自动把 `edge-functions/` 与函数依赖清单复制进 `dist/` 使其自包含。
 5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台）。函数由平台打包：**jose / bcryptjs 同时声明在根 `package.json` 与 `edge-functions/package.json`**（平台以仓库根 `node_modules` 打包函数，子目录不单独安装依赖；这两包未被前端 import，不会进入前端 bundle）。
 6. 配置要点：输出目录 `dist`、构建命令 `npm run build`、**无需 SPA fallback**（Hash 路由，`#` 后路径由前端处理）。
@@ -161,15 +160,7 @@ server {
 }
 ```
 
-### Supabase → Neon 迁移指南（当前推荐路径）
-
-1. 在 Neon 创建项目，创建角色 `nav_read` / `nav_admin`（直连串，非 -pooler）。
-2. 在 SQL Editor 一次性执行 `database/neon_schema.sql`（表结构/种子沿用原 PostgreSQL，RLS 重写为按角色授权：`nav_read` 只读可见行且 `config` 排除 `admin_pwd`，`nav_admin` 全权含隐藏行）。
-3. 设置 `config.admin_pwd` 为 bcrypt 哈希（16 位以上强密码，成本因子固定 10，原因见快速开始 §3）。
-4. 按上文「EdgeOne Makers 一体化部署」将项目（含 `edge-functions/api/**`）作为一个 Makers 项目部署，配置 `DATABASE_URL_ADMIN` / `JWT_SECRET` 与 VITE_* 环境变量。
-5. 重新构建并部署：`npm run build` → `edgeone makers deploy ./dist`。
-
-> 历史路径：如需继续使用自建 REST (MySQL) 后端，执行 `database/mysql_schema.sql` 并按数据映射 `UUID→VARCHAR(36)`、`TIMESTAMPTZ→DATETIME`、`BOOLEAN→TINYINT(1)`、`BIGSERIAL→BIGINT UNSIGNED AUTO_INCREMENT` 迁移，前端 `VITE_BACKEND=rest` 配置 `VITE_API_BASE_URL`。（`database/supabase_schema.sql` 保留为迁移前历史参考，不再作为运行模式。）
+> 历史路径：如需继续使用自建 REST (MySQL) 后端，执行 `database/mysql_schema.sql` 并按数据映射 `UUID→VARCHAR(36)`、`TIMESTAMPTZ→DATETIME`、`BOOLEAN→TINYINT(1)`、`BIGSERIAL→BIGINT UNSIGNED AUTO_INCREMENT` 迁移，前端 `VITE_BACKEND=rest` 配置 `VITE_API_BASE_URL`。
 
 ## Makers Edge Functions 路由（API 说明）
 
@@ -239,7 +230,6 @@ server {
 │   └── package.json        # 函数依赖唯一声明（jose/bcryptjs/@neondatabase/serverless）
 ├── database/
 │   ├── neon_schema.sql     # Neon PostgreSQL + RLS(双角色) + GRANT + 种子数据
-│   ├── supabase_schema.sql # 历史参考（迁移前 Supabase 版本）
 │   └── mysql_schema.sql    # MySQL 参考后端 schema + 种子数据
 ├── backend-reference/      # Node.js Express 参考后端（可选）
 │   ├── src/
@@ -276,8 +266,6 @@ server {
 |------|------|------|
 | `DATABASE_URL_ADMIN` | neon 模式 | nav_admin 连接串（后台代理执行 SQL 用） |
 | `JWT_SECRET` | neon 模式 | HS256 JWT 密钥（≥32 字符随机串） |
-
-> 已废弃：`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`（Supabase 后端已移除）。
 
 ## License
 

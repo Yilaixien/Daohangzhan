@@ -5,8 +5,8 @@ import type { Services, Link, Category, Apply, SearchEngine, StatsOverview } fro
 // Neon（PostgreSQL）服务实现 —— 前端直连公开读 + EdgeOne Makers 函数代理后台
 //
 // 数据源分工：
-//  - 公开读写：浏览器直连 Neon HTTP /sql（角色 nav_read，RLS 强制行级过滤，
-//    等价 Supabase anon key）。见 database/neon_schema.sql 的 rd_* 策略。
+//  - 公开读写：浏览器直连 Neon HTTP /sql（角色 nav_read，RLS 强制行级过滤）。
+//    见 database/neon_schema.sql 的 rd_* 策略。
 //  - 后台读写：一律走 Makers 项目内 Edge Functions（edge-functions/api/**，
 //    函数内以 nav_admin 执行，后台读含隐藏/停用行 —— 与该实现的前台直连 SQL
 //    语义不同，勿互相复用）。函数随 Makers 单项目部署，同域路由，默认 /api。

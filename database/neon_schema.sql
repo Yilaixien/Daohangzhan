@@ -1,10 +1,9 @@
 -- ============================================
 -- 网址导航站 - Neon (PostgreSQL) Schema
 -- ============================================
--- 由 database/supabase_schema.sql 迁移而来：
---   1. DDL / 种子数据保持不变（本就是 PostgreSQL）
---   2. RLS 策略重写：删除依赖 Supabase auth schema 的 auth.role() 策略，
---      改为按角色 nav_read（公开，过滤可见行）/ nav_admin（后台全权）授权
+-- 本文件为当前数据层（Neon PostgreSQL）的 schema 定义：
+--   1. 包含建表 + 种子数据 + RLS 策略 + GRANT
+--   2. RLS 按角色授权：nav_read（公开，过滤可见行）/ nav_admin（后台全权）
 --   3. 浏览器公开读走 nav_read（直连，RLS 强制行过滤）；
 --      后台登录与写操作走 EdgeOne Functions 代理（函数内以 nav_admin 执行）
 --
@@ -108,7 +107,7 @@ CREATE INDEX idx_click_time ON click_stats(clicked_at);
 -- RLS（Row Level Security）
 -- ============================================
 -- 安全边界: RLS + nav_read/nav_admin 双角色。
--- nav_read 凭据内联在前端 bundle 中, 等价 Supabase anon key（受 RLS 约束）;
+-- nav_read 凭据内联在前端 bundle 中（仅持 RLS 允许的最小权限）;
 -- nav_admin 凭据仅存 EdgeOne Functions 服务端环境变量。
 -- 自建 JWT 仅是"会话状态标记": Postgres/RLS 不校验它, 担不起鉴权职责。
 
