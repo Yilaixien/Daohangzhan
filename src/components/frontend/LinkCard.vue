@@ -12,19 +12,19 @@
         v-if="isImageIcon && !imageError"
         :src="link.icon!"
         :alt="link.title"
-        class="w-8 h-8 object-contain"
+        class="w-10 h-10 object-contain"
         loading="lazy"
         decoding="async"
         @error="imageError = true"
       />
       <div
         v-else-if="link.icon && !isImageIcon"
-        class="text-2xl group-hover:scale-110 transition-transform"
+        class="text-3xl group-hover:scale-110 transition-transform"
         v-html="link.icon"
       ></div>
       <div
         v-else
-        class="w-8 h-8 rounded-lg text-sm font-bold glass-text"
+        class="w-10 h-10 rounded-lg text-sm font-bold glass-text"
         style="background: var(--glass-bg-strong); border: 1px solid var(--glass-border)"
       >
         {{ link.title.charAt(0) }}
