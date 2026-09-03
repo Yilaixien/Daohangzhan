@@ -78,7 +78,7 @@
         <h3 class="text-lg font-semibold text-gray-700 mb-4 pb-2 border-b">关于页面</h3>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">关于页面内容 (HTML)</label>
-          <textarea v-model="config.about_content" rows="6" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono"></textarea>
+          <textarea v-model="config.about_content" rows="6" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
         </div>
       </div>
 

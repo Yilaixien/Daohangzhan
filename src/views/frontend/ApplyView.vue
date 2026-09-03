@@ -133,7 +133,7 @@
                 class="px-2 py-1 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex-shrink-0"
                 title="刷新验证码"
               >
-                <span class="text-lg font-mono font-bold text-gray-600 tracking-wider select-none leading-none">{{ captchaCode }}</span>
+                <span class="text-lg font-bold text-gray-600 tracking-wider select-none leading-none">{{ captchaCode }}</span>
               </button>
             </div>
           </div>

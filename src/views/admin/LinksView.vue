@@ -135,7 +135,7 @@
       <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
         <h3 class="text-lg font-semibold text-gray-800 mb-4">批量添加链接</h3>
         <p class="text-sm text-gray-500 mb-3">每行一个链接，格式：<code class="bg-gray-100 px-1 rounded">名称 | URL | 分组ID</code></p>
-        <textarea v-model="batchText" rows="6" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono" placeholder="百度 | https://www.baidu.com | 1"></textarea>
+        <textarea v-model="batchText" rows="6" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="百度 | https://www.baidu.com | 1"></textarea>
         <div class="flex justify-end gap-2 mt-4">
           <button @click="showBatchAdd = false" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
           <button @click="handleBatchAdd" :disabled="batchSaving" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">

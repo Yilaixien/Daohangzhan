@@ -49,7 +49,7 @@
                 <span class="text-sm text-gray-500">{{ getCategoryName(apply.category_id) }}</span>
               </td>
               <td class="px-4 py-3 hidden sm:table-cell">
-                <span class="text-sm text-gray-500">{{ formatDate(apply.created_at) }}</span>
+                <span class="text-sm text-gray-500 font-datetime">{{ formatDate(apply.created_at) }}</span>
               </td>
               <td class="px-4 py-3">
                 <span

@@ -1,5 +1,38 @@
 @import "tailwindcss";
 
+/* ============ 字体体系 ============ */
+@font-face {
+  font-family: 'AlibabaPuHuiTi';
+  src: url('./assets/fonts/AlibabaPuHuiTi-M.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'PangMenZhengDaoXiXianTi';
+  src: url('./assets/fonts/PangMenZhengDaoXiXianTi.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  /* 全站默认字体（覆盖 Tailwind Preflight 默认值，同时生成 font-sans 工具类） */
+  --font-sans: 'AlibabaPuHuiTi', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Microsoft JhengHei', 'Helvetica Neue', Arial, sans-serif;
+  /* 日期/时间专用字体工具类 font-datetime */
+  --font-datetime: 'PangMenZhengDaoXiXianTi', 'AlibabaPuHuiTi',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+@layer base {
+  /* 兜底：确保 html 上全局字体必生效（覆盖前台 .glass-page 与后台灰色页面） */
+  html {
+    font-family: var(--font-sans);
+  }
+}
+
 /* ============ 毛玻璃主题变量体系 ============ */
 :root,
 [data-theme='light'] {

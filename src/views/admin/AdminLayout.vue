@@ -45,7 +45,7 @@
       <header class="h-14 bg-white shadow-sm border-b border-gray-200 flex items-center justify-between px-6">
         <h1 class="text-lg font-semibold text-gray-800">{{ currentPageTitle }}</h1>
         <div class="flex items-center space-x-3">
-          <span class="text-sm text-gray-500">
+          <span class="text-sm text-gray-500 font-datetime">
             {{ currentTime }}
           </span>
         </div>

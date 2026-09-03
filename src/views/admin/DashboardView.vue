@@ -207,6 +207,10 @@ async function renderChart() {
   const labels = trendData.value.map((d) => d.date.slice(5)) // "MM-DD"
   const values = trendData.value.map((d) => d.count)
 
+  // 画布文字不受 CSS font-family 影响，需为日期刻度/提示框显式指定字体（与全局字体体系一致）
+  const dateFontFamily =
+    "PangMenZhengDaoXiXianTi, AlibabaPuHuiTi, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
   chartInstance = new Chart(chartCanvas.value, {
     type: 'line',
     data: {
@@ -238,12 +242,14 @@ async function renderChart() {
           padding: 10,
           cornerRadius: 8,
           displayColors: false,
+          titleFont: { family: dateFontFamily },
+          bodyFont: { family: dateFontFamily },
         },
       },
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: '#9ca3af', font: { size: 11 } },
+          ticks: { color: '#9ca3af', font: { size: 11, family: dateFontFamily } },
         },
         y: {
           beginAtZero: true,
