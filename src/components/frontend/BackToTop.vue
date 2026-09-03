@@ -14,25 +14,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
+import { useScroll } from '@/composables/useScroll'
 
-const visible = ref(false)
+const { scrollY } = useScroll()
 
-function handleScroll() {
-  visible.value = window.scrollY > 300
-}
+// 由共享滚动源派生，无需自行挂载 scroll 监听
+const visible = computed(() => scrollY.value > 300)
 
 function scrollToTop() {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
-
-onMounted(() => {
-  window.addEventListener('scroll', handleScroll, { passive: true })
-})
-
-onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
-})
 </script>
 
 <style scoped>

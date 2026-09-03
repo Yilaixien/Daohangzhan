@@ -56,7 +56,11 @@
 
       <!-- 分组导航区域 -->
       <div v-else>
-        <section v-for="category in store.categoriesWithLinks" :key="category.id" class="mb-10">
+        <section
+          v-for="category in store.categoriesWithLinks"
+          :key="category.id"
+          class="mb-10 [content-visibility:auto] [contain-intrinsic-size:auto_360px]"
+        >
           <h3
             class="glass-text text-lg font-semibold mb-4 pb-2"
             style="border-bottom: 1px solid var(--glass-border)"
@@ -88,9 +92,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useHomeStore } from '@/stores/home'
 import { useDateTime } from '@/composables/useDateTime'
+import { useScroll } from '@/composables/useScroll'
 import FrontendLayout from './FrontendLayout.vue'
 import SearchBox from '@/components/frontend/SearchBox.vue'
 import LinkCard from '@/components/frontend/LinkCard.vue'
@@ -99,28 +104,29 @@ import BackToTop from '@/components/frontend/BackToTop.vue'
 
 const store = useHomeStore()
 const { timeStr } = useDateTime()
+const { scrollY } = useScroll()
 
 const shellRef = ref<HTMLElement | null>(null)
-const scrolled = ref(false)
+// 吸顶阈值 = 搜索条起始偏移（滚动位置为 0 时测量）。
+// sticky top:0 元素在 scrollY >= 起始偏移时恰好触顶，与原「rect.top <= 0」判定等价，
+// 但滚动帧内不再读布局（避免每帧强制同步布局）。
+const stuckAt = ref(0)
 
-let ticking = false
-function handleScroll() {
-  if (ticking) return
-  ticking = true
-  requestAnimationFrame(() => {
-    ticking = false
-    // 以搜索条自身位置判定吸顶：恰好在触顶瞬间切换，无瞬移
-    scrolled.value = (shellRef.value?.getBoundingClientRect().top ?? 0) <= 0
-  })
+function measure() {
+  stuckAt.value = shellRef.value?.getBoundingClientRect().top ?? 0
 }
 
-onMounted(() => {
-  store.fetchData()
-  window.addEventListener('scroll', handleScroll, { passive: true })
+const scrolled = computed(() => scrollY.value >= stuckAt.value)
+
+onMounted(async () => {
+  await store.fetchData()
+  // fetchData 完成后测量（确保排版稳定），窗口缩放时重新测量
+  measure()
+  window.addEventListener('resize', measure)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('resize', measure)
 })
 </script>
 
@@ -134,7 +140,8 @@ onUnmounted(() => {
   margin: 0 auto;
   padding: 12px 16px;
   transform: translateZ(0); /* GPU 合成层，稳定 backdrop-filter */
-  will-change: transform, max-width;
+  will-change: transform; /* 仅合成器可处理的属性才提示 */
+  contain: paint; /* 隔离内部绘制，避免溢出重绘 */
   transition: max-width 0.45s cubic-bezier(0.22, 1, 0.36, 1),
     padding 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
 }

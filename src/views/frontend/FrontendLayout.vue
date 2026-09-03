@@ -44,9 +44,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { services } from '@/services'
 import { useThemeStore } from '@/stores/theme'
+import { useScroll } from '@/composables/useScroll'
 import BackgroundImage from '@/components/frontend/BackgroundImage.vue'
 
 const siteTitle = ref('')
@@ -54,9 +55,9 @@ const siteLogo = ref('')
 const copyright = ref('')
 const icp = ref('')
 const bgUrl = ref('')
-const navHidden = ref(false)
 
 const themeStore = useThemeStore()
+const { scrollY } = useScroll()
 
 const navItems = [
   { path: '/', label: '首页' },
@@ -64,12 +65,10 @@ const navItems = [
   { path: '/apply', label: '申请收录' },
 ]
 
-function handleScroll() {
-  navHidden.value = window.scrollY > 64
-}
+// 由共享滚动源派生，无需自行挂载 scroll 监听
+const navHidden = computed(() => scrollY.value > 64)
 
 onMounted(async () => {
-  window.addEventListener('scroll', handleScroll, { passive: true })
   try {
     const config = await services.config.getAll()
     siteTitle.value = config.title || ''
@@ -81,10 +80,6 @@ onMounted(async () => {
   } catch {
     // 配置加载失败时使用默认值
   }
-})
-
-onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
 })
 </script>
 
