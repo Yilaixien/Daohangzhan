@@ -200,3 +200,28 @@
 .glass-link:hover {
   color: var(--glass-text);
 }
+
+/* ============ 滚动中降级（仅触摸设备）============ */
+/* 低端手机滚动期间逐帧重算 backdrop-filter 是卡顿/延迟主因；滚动中模糊本就难以察觉，
+   停滞后立即恢复完整毛玻璃，外观基本无感。桌面端（hover 设备）不受影响，始终全效。 */
+@media (hover: none) {
+  html[data-scrolling] .glass,
+  html[data-scrolling] .glass-card,
+  html[data-scrolling] .glass-strong,
+  html[data-scrolling] .glass-strip,
+  html[data-scrolling] .glass-chip,
+  html[data-scrolling] .btn-glass,
+  html[data-scrolling] .search-glass {
+    backdrop-filter: none;
+  }
+  /* 无模糊时提升一点不透明度保持"玻璃"质感，并暂停过渡避免反复切换闪烁 */
+  html[data-scrolling] .glass-chip,
+  html[data-scrolling] .btn-glass {
+    background: rgba(255, 255, 255, 0.22);
+    transition: none;
+  }
+  html[data-scrolling] .search-glass {
+    background: rgba(255, 255, 255, 0.34);
+    transition: none;
+  }
+}

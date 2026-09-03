@@ -13,6 +13,8 @@
         :src="link.icon!"
         :alt="link.title"
         class="w-8 h-8 object-contain"
+        loading="lazy"
+        decoding="async"
         @error="imageError = true"
       />
       <div

@@ -13,7 +13,27 @@ const scrollY = ref(0)
 let started = false
 let ticking = false
 
+// ---------- 滚动中标记（滚动期间降级 backdrop-filter 等重活，提升跟手度） ----------
+let scrollingApplied = false
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+function setScrolling(on: boolean) {
+  if (scrollingApplied === on) return
+  scrollingApplied = on
+  // CSS 侧据此在触摸设备滚动期间关闭毛玻璃模糊（html[data-scrolling]）
+  document.documentElement.setAttribute('data-scrolling', on ? 'true' : '')
+  if (!on && idleTimer) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+}
+
 function onScroll() {
+  // 滚动开始立即打标，连续 150ms 无滚动事件或触发 scrollend 时移除
+  setScrolling(true)
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = setTimeout(() => setScrolling(false), 150)
+
   if (ticking) return
   ticking = true
   requestAnimationFrame(() => {
@@ -32,6 +52,10 @@ export function useScroll() {
       // 挂载时补读当前位置（浏览器可能恢复了滚动位置）
       scrollY.value = window.scrollY
       window.addEventListener('scroll', onScroll, { passive: true })
+      // 支持 scrollend 的浏览器（Chrome 114+）滚动停止时立即恢复
+      if ('onscrollend' in window) {
+        window.addEventListener('scrollend', () => setScrolling(false))
+      }
     }
   })
 
