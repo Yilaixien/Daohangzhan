@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm ci && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json && mkdir -p dist/edge-functions/node_modules/@neondatabase && cp -r node_modules/jose node_modules/bcryptjs dist/edge-functions/node_modules/ && cp -r node_modules/@neondatabase/serverless dist/edge-functions/node_modules/@neondatabase/",
+    "build": "npm ci && vue-tsc -b && vite build && cp -r edge-functions dist/edge-functions && cp edge-functions/package.json dist/edge-functions/package.json && npx esbuild dist/edge-functions/api/[[default]].js --bundle --format=esm --platform=browser --allow-overwrite --outfile=dist/edge-functions/api/[[default]].js && rm -rf dist/edge-functions/node_modules",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -23,6 +23,7 @@
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.8.3",
     "vite": "^8.2.1",

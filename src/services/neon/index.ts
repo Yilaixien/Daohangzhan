@@ -36,9 +36,27 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
-  const res = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: { ...headers, ...options.headers },
+  const fullInit: RequestInit = { ...options, headers: { ...headers, ...options.headers } }
+
+  // EdgeOne 边缘函数偶发执行异常（如 545：bcrypt 等重 CPU 操作触达单次执行限制），
+  // 指数退避自动重试；业务性 4xx（401/校验失败）不重试
+  const MAX_ATTEMPTS = 3
+  let lastErr: Error | null = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** (attempt - 2)))
+    try {
+      return await doApiFetch<T>(path, fullInit)
+    } catch (error) {
+      lastErr = error as Error
+      if (!(error as Error & { retryable?: boolean }).retryable) throw error
+    }
+  }
+  throw lastErr ?? new Error('请求失败，请重试')
+}
+
+async function doApiFetch<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(`${apiBase}${path}`, init).catch(() => {
+    throw Object.assign(new Error('网络请求失败（边缘节点波动），已自动重试'), { retryable: true })
   })
 
   // 401：登录接口抛出函数侧原因（如"用户名或密码错误"）；其余接口视为会话失效，清除令牌并回登录页
@@ -57,12 +75,20 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   try {
     body = await res.json()
   } catch {
+    // 5xx 非 JSON：EdgeOne 函数执行异常（如 545），可重试
+    if (res.status >= 500) {
+      throw Object.assign(new Error(`Edge 函数瞬时异常（HTTP ${res.status}），已自动重试`), { retryable: true })
+    }
     throw new Error(
       `接口返回异常：HTTP ${res.status}，响应非 JSON（content-type: ${res.headers.get('content-type') || '未知'}）。` +
         '请确认 Edge Functions 已随 Makers 项目部署、/api 路由已生效（响应为 HTML 首页即函数未生效）',
     )
   }
   if (!res.ok) {
+    // 5xx（含 EdgeOne 545 等函数偶发失败）可重试
+    if (res.status >= 500) {
+      throw Object.assign(new Error(body?.message || `HTTP ${res.status}`), { retryable: true })
+    }
     throw new Error(body?.message || `HTTP ${res.status}`)
   }
   if (!body || typeof body !== 'object' || !('data' in body)) {

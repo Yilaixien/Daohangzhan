@@ -20,12 +20,12 @@
  *  - 本地/工具: process.env 兜底
  *  - 缓存键使用 dbUrl::jwtSecret 字符串; neon() 返回连接池, 必须全局单例只建一次
  *
- * 平台限制提醒：单次执行 CPU 200ms（不含 I/O 等待）。bcrypt 校验为 CPU 计算,
- *   成本因子固定 10（cost>=11 有超限风险）, 登录接口尽量精简。函数代码包 <=5MB。
+ * 平台限制提醒：单次执行 CPU 200ms（不含 I/O 等待）。登录密码校验走数据库侧
+ *   pgcrypto.crypt（Neon 独立 CPU），边缘函数仅做 I/O 等待，避免 bcrypt CPU 超限 545。函数代码包 <=5MB。
  */
 import { neon } from '@neondatabase/serverless'
 import { SignJWT, jwtVerify } from 'jose'
-import bcrypt from 'bcryptjs'
+// 注：密码校验已改为数据库侧 pgcrypto.crypt（规避边缘函数 CPU 限制），不再依赖 bcryptjs
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -76,6 +76,10 @@ async function verifyToken(request, rt) {
 
 // ---------- 登录 ----------
 // body 由 handleRequest 统一解析后传入（request 流只能读一次，login 内不可再 request.json()）
+// 密码校验在数据库侧执行（pgcrypto.crypt，Neon 独立 CPU）：
+//   bcrypt cost=10 在边缘函数内计算会偶发触达 EdgeOne 单次 200ms CPU 限制（HTTP 545 "Error return from script"）；
+//   交给 Neon 后边缘函数只剩 I/O 等待，登录接口稳定。
+//   $2b$（bcryptjs 生成）与 $2a$ 算法等价，先归一化$2b$->$2a$ 再交由 crypt 校验。
 async function login(request, rt, body) {
   const { sql } = rt
   const { username, password } = body || {}
@@ -87,9 +91,11 @@ async function login(request, rt, body) {
   if (username !== adminUser || !adminPwdHash) {
     return fail('用户名或密码错误', 401)
   }
-  // 异步 compare, 勿用同步 compareSync 以免阻塞事件循环/耗光 CPU 时间片
-  const passwordValid = await bcrypt.compare(password || '', adminPwdHash)
-  if (!passwordValid) {
+  const checks = await sql`
+    SELECT (replace(value, '$2b$', '$2a$') = crypt(${password || ''}, replace(value, '$2b$', '$2a$'))) AS ok
+    FROM config WHERE key = 'admin_pwd' LIMIT 1
+  `
+  if (!checks[0]?.ok) {
     return fail('用户名或密码错误', 401)
   }
   const token = await new SignJWT({ role: 'admin', sub: 'admin' })
