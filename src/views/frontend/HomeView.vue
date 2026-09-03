@@ -8,12 +8,11 @@
       </div>
     </section>
 
-    <!-- 搜索区（sticky 吸顶：不脱离文档流、无布局跳变） -->
-    <div ref="shellRef" class="search-shell w-full" :class="{ stuck: scrolled }">
+    <!-- 搜索区（居中窄条，随页面自然滚动、不吸顶） -->
+    <div class="search-shell w-full">
       <SearchBox
         :engines="store.searchEngines"
         :engine="store.currentEngine"
-        :stuck="scrolled"
         @search="store.doSearch"
         @change-engine="store.setCurrentEngine"
       />
@@ -80,9 +79,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { onMounted } from 'vue'
 import { useHomeStore } from '@/stores/home'
-import { useScroll } from '@/composables/useScroll'
 import FrontendLayout from './FrontendLayout.vue'
 import SearchBox from '@/components/frontend/SearchBox.vue'
 import LinkCard from '@/components/frontend/LinkCard.vue'
@@ -90,50 +88,17 @@ import DateTimeDisplay from '@/components/frontend/DateTimeDisplay.vue'
 import BackToTop from '@/components/frontend/BackToTop.vue'
 
 const store = useHomeStore()
-const { scrollY } = useScroll()
 
-const shellRef = ref<HTMLElement | null>(null)
-// 吸顶阈值 = 搜索条起始偏移（滚动位置为 0 时测量）。
-// sticky top:0 元素在 scrollY >= 起始偏移时恰好触顶，与原「rect.top <= 0」判定等价，
-// 但滚动帧内不再读布局（避免每帧强制同步布局）。
-const stuckAt = ref(0)
-
-function measure() {
-  stuckAt.value = shellRef.value?.getBoundingClientRect().top ?? 0
-}
-
-const scrolled = computed(() => scrollY.value >= stuckAt.value)
-
-onMounted(async () => {
-  await store.fetchData()
-  // fetchData 完成后测量（确保排版稳定），窗口缩放时重新测量
-  measure()
-  window.addEventListener('resize', measure)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', measure)
+onMounted(() => {
+  store.fetchData()
 })
 </script>
 
 <style scoped>
-/* 搜索区外壳：position: sticky，不脱离文档流、无布局跳变 */
+/* 搜索区外壳：居中窄条，不吸顶、无滚动动画 */
 .search-shell {
-  position: sticky;
-  top: 0;
-  z-index: 40;
   max-width: 42rem;
   margin: 0 auto;
   padding: 12px 16px;
-  transform: translateZ(0); /* GPU 合成层，稳定 backdrop-filter */
-  will-change: transform; /* 仅合成器可处理的属性才提示 */
-  contain: paint; /* 隔离内部绘制，避免溢出重绘 */
-  transition: max-width 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-    padding 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
-}
-
-/* 吸顶态：变通栏（平滑过渡），无背景/分隔线/投影，只留搜索胶囊悬浮 */
-.search-shell.stuck {
-  max-width: none;
 }
 </style>

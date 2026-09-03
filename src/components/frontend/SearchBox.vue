@@ -1,13 +1,7 @@
 <template>
-  <div
-    class="search-inner mx-auto max-w-3xl whitespace-nowrap"
-    :class="stuck ? 'pr-20' : ''"
-  >
+  <div class="search-inner mx-auto max-w-3xl whitespace-nowrap">
     <!-- 搜索行 -->
-    <div
-      class="search-glass flex items-center rounded-full overflow-hidden"
-      :class="stuck ? 'h-12' : 'h-12 sm:h-14'"
-    >
+    <div class="search-glass flex items-center rounded-full overflow-hidden h-12 sm:h-14">
       <div class="pl-5 flex-shrink-0 glass-text-faint">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -33,11 +27,8 @@
       </button>
     </div>
 
-    <!-- 搜索引擎选择按钮（吸顶时收起） -->
-    <div
-      class="flex justify-center flex-wrap gap-2.5 mt-4 overflow-hidden transition-all duration-500"
-      :class="stuck ? 'opacity-0 max-h-0 mt-0 pointer-events-none' : 'opacity-100 max-h-20'"
-    >
+    <!-- 搜索引擎选择按钮（常显） -->
+    <div class="flex justify-center flex-wrap gap-2.5 mt-4 overflow-hidden opacity-100 max-h-20">
       <button
         v-for="e in engines"
         :key="e.id"
@@ -61,8 +52,6 @@ import type { SearchEngine } from '@/services/contracts'
 defineProps<{
   engines: SearchEngine[]
   engine: SearchEngine
-  /** 吸顶态：搜索框变宽变长，与导航条高度持平 */
-  stuck?: boolean
 }>()
 
 const emit = defineEmits<{

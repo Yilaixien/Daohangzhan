@@ -5,8 +5,8 @@
 
     <!-- 主内容 -->
     <main class="flex-1 relative z-10">
-      <!-- 顶部导航：页面流内普通行，随页面滚动、无玻璃背景、无隐藏动画 -->
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-3 flex items-center gap-4">
+      <!-- 顶部导航：页面流内普通行，贴视口左侧、随页面滚动、无玻璃背景、无隐藏动画 -->
+      <div class="px-4 sm:px-6 pt-6 pb-3 flex items-center gap-4">
         <router-link v-if="siteLogo" to="/" class="flex items-center shrink-0">
           <img :src="siteLogo" alt="Logo" class="h-7 w-7 rounded-full object-contain" />
         </router-link>
