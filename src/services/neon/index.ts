@@ -40,14 +40,33 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     ...options,
     headers: { ...headers, ...options.headers },
   })
+
+  // 401：登录接口抛出函数侧原因（如"用户名或密码错误"）；其余接口视为会话失效，清除令牌并回登录页
   if (res.status === 401) {
-    localStorage.removeItem('auth_token')
-    window.location.hash = '#/admin/login'
-    throw new Error('Unauthorized')
+    if (!/\/auth\/login$/.test(path)) {
+      localStorage.removeItem('auth_token')
+      window.location.hash = '#/admin/login'
+      throw new Error('认证已失效，请重新登录')
+    }
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body?.message || '用户名或密码错误')
   }
-  const body = await res.json().catch(() => ({}))
+
+  // 响应必须是 JSON；否则说明请求根本没打到函数（例如被静态资源/SPA 兜底成 HTML）
+  let body: any
+  try {
+    body = await res.json()
+  } catch {
+    throw new Error(
+      `接口返回异常：HTTP ${res.status}，响应非 JSON（content-type: ${res.headers.get('content-type') || '未知'}）。` +
+        '请确认 Edge Functions 已随 Makers 项目部署、/api 路由已生效（响应为 HTML 首页即函数未生效）',
+    )
+  }
   if (!res.ok) {
-    throw new Error(body.message || `HTTP ${res.status}`)
+    throw new Error(body?.message || `HTTP ${res.status}`)
+  }
+  if (!body || typeof body !== 'object' || !('data' in body)) {
+    throw new Error('接口返回缺少 data 字段：函数可能未部署或 /api 路由未生效')
   }
   return body.data as T
 }
