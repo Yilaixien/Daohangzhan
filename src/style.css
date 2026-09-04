@@ -108,12 +108,12 @@
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
+/* 链接卡片默认不带模糊（初始即透明，与滚动降级后的观感一致，避免首屏磨砂/滚动透明的跳变） */
 .glass-card {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 14px;
   box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 
@@ -246,9 +246,9 @@
 
 /* ============ 滚动中降级（所有设备，PC 低配收益最大）============ */
 /* 滚动期间逐帧重算 backdrop-filter 是卡顿/延迟主因；滚动中模糊本就难以察觉，
-   滚动停止（150ms 无事件或 scrollend）后立即恢复完整毛玻璃，外观基本无感。 */
+   滚动停止（150ms 无事件或 scrollend）后立即恢复完整毛玻璃，外观基本无感。
+   链接卡片 .glass-card 默认即无模糊（初始透明），不参与此降级。 */
 html[data-scrolling] .glass,
-html[data-scrolling] .glass-card,
 html[data-scrolling] .glass-strong,
 html[data-scrolling] .glass-strip,
 html[data-scrolling] .glass-chip,
