@@ -113,7 +113,8 @@
   border: 1px solid var(--glass-border);
   border-radius: 14px;
   box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  /* 无 backdrop-filter：链接卡片常驻半透明样式（与滚动中观感一致），
+     避免 html[data-scrolling] 滚动降级造成"磨砂↔透明"跳变 */
   transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 
