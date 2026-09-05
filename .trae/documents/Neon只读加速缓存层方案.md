@@ -9,7 +9,10 @@
 - 快照命中且未过期（TTL 可配置）→ 直接返回，**完全不回源 Neon**；
 - 未命中/过期 → 以 **nav_admin** 并行查询 `config/categories/links/search_engines` 重建快照，写回 Blob 后返回 JSON；
 - 后台写操作（links/categories/config/search-engines/apply 审核）在数据库修改成功后，通过 `context.waitUntil` 主动重建并覆盖同一份快照；
+- **点击统计**：浏览器不再直连 Neon 插入 `click_stats`，改为 `POST /api/stats/click` 边缘函数入口，函数内**内存缓冲 + 批量/延迟写入**（按条数与时间阈值合并为单条批量 INSERT），每次点击 0 次 Neon 查询；
 - 前端公开页面（首页/关于/申请收录/前台布局）统一改走该端点，前台对 Neon 的直连查询收敛为**每页面 1 次边缘请求**（且命中后为 0 次回源），后台管理读保持实时、不缓存。
+
+经此调整后，浏览器侧对 Neon 的直连点仅剩：收录申请匿名提交（`apply` 插入）、死链检测公开链接读取（快照降级兜底亦复用）——均为低频操作。
 
 实现语言与依赖：Edge Functions 侧新增 `@edgeone/pages-blob`（Makers 官方 Blob SDK），前端仅做服务层路由调整，无 UI 改动。
 
@@ -25,8 +28,9 @@
 | 后台写 | `edge-functions/api/[[default]].js` 以 nav_admin 执行 SQL（JWT 验签） | 写后前台仍要等 TTL 才见新数据 |
 | 函数运行时 | 单次 CPU 200ms（不含 I/O）；`runtimeCache` 模块级单例；`getRuntime` 同时要求 `DATABASE_URL_ADMIN` + `JWT_SECRET` | 公开读端点不应依赖 JWT_SECRET，需小幅重构 |
 | 存储 | 平台已提供 Blob（`@edgeone/pages-blob`：`getStore`/`set`/`setJSON`/`get`/`list`，默认 60s 最终一致、可选 strong，单值 ≤25MB，首次 `getStore` 自动建命名空间）与 `context.waitUntil`（后台任务） | 可直接承载快照缓存与 SWR |
+| 点击统计 | [neon/index.ts](file:///workspace/src/services/neon/index.ts#L346-L353) `stats.recordClick()` 经 `readSql` 逐条 INSERT `click_stats` | 每次点击 = 1 次浏览器直连 Neon 写；体量随流量线性增长 |
 
-结论：新增一个聚合快照端点即可把「前台公开读」收敛为 1 次边缘请求，命中后 0 回源；管理端读（含隐藏行、stats、apply）保持原样不缓存。
+结论：新增一个聚合快照端点即可把「前台公开读」收敛为 1 次边缘请求，命中后 0 回源；管理端读（含隐藏行、stats、apply）保持原样不缓存；点击统计收敛为边缘缓冲 + 批量写，0 次/笔直连。
 
 ---
 
