@@ -124,4 +124,17 @@ export interface Services {
   auth: IAuthService
   searchEngines: ISearchEngineService
   stats: IStatsService
+  frontendData: IFrontendDataService
+}
+
+// 公开只读快照（边缘函数 /api/frontend-data 返回的聚合数据；命中 Blob 快照时零回源 Neon）
+export interface FrontendData {
+  config: Record<string, string>
+  categories: Category[]
+  links: Link[]
+  search_engines: SearchEngine[]
+}
+
+export interface IFrontendDataService {
+  getAll(): Promise<FrontendData>
 }

@@ -208,16 +208,15 @@ function refreshCaptcha() {
 
 onMounted(async () => {
   try {
-    const config = await services.config.getAll()
+    // 公开只读快照（边缘函数，命中零回源 Neon）：config + categories 一次取回
+    const data = await services.frontendData.getAll()
+    const config = data.config
     const applyVal = parseInt(config.apply || '0')
     applyStatus.value = applyVal
     applyNotice.value = config.apply_gg || ''
     if (config.fetch_title_api) fetchTitleApi.value = config.fetch_title_api
     if (config.fetch_icon_api) fetchIconApi.value = config.fetch_icon_api
-  } catch {}
-
-  try {
-    categories.value = await services.categories.getAll()
+    categories.value = data.categories
   } catch {}
 
   generateCaptcha()

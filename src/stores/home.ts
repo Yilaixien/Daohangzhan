@@ -29,28 +29,22 @@ export const useHomeStore = defineStore('home', () => {
   async function fetchData() {
     loading.value = true
     try {
-      // 加载站点配置
-      const config = await services.config.getAll()
-      siteConfig.value = config
-      if (config['home-title']) {
-        homeTitle.value = config['home-title'].replace(/<[^>]*>/g, '')
+      // 公开只读数据一次拉取（边缘函数快照，命中零回源 Neon）
+      const data = await services.frontendData.getAll()
+      siteConfig.value = data.config
+      if (data.config['home-title']) {
+        homeTitle.value = data.config['home-title'].replace(/<[^>]*>/g, '')
       }
       // 加载搜索引擎
-      try {
-        const engines = await services.searchEngines.getAll()
-        if (engines.length > 0) {
-          searchEngines.value = engines
-          currentEngine.value = engines[0]
-        }
-      } catch {
-        // 使用默认搜索引擎
+      if (data.search_engines.length > 0) {
+        searchEngines.value = data.search_engines
+        currentEngine.value = data.search_engines[0]
       }
 
-      // 加载分组和链接
-      const categories = await services.categories.getAll()
+      // 按分组聚合链接
       const result: CategoryWithLinks[] = []
-      for (const cat of categories) {
-        const links = await services.links.getByCategory(cat.id)
+      for (const cat of data.categories) {
+        const links = data.links.filter((l) => l.category_id === cat.id)
         if (links.length > 0) {
           result.push({ ...cat, links })
         }

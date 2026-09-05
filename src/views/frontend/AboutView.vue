@@ -36,7 +36,9 @@ const content = ref('')
 
 onMounted(async () => {
   try {
-    content.value = (await services.config.get('about_content')) || ''
+    // 公开只读快照（边缘函数，命中零回源 Neon）
+    const data = await services.frontendData.getAll()
+    content.value = data.config['about_content'] || ''
   } catch {
     // 加载失败
   } finally {

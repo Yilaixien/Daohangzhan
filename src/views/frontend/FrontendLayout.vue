@@ -57,7 +57,9 @@ const navItems = [
 
 onMounted(async () => {
   try {
-    const config = await services.config.getAll()
+    // 公开只读快照（边缘函数，命中零回源 Neon）
+    const data = await services.frontendData.getAll()
+    const config = data.config
     siteLogo.value = config.logo || ''
     copyright.value = config.copyright || ''
     icp.value = config.icp || ''

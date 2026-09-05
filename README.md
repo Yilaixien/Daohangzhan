@@ -1,6 +1,6 @@
 # 网址导航站
 
-基于 Vue 3 + Vite + TypeScript + Pinia 的纯前端 SPA 网址导航站。数据层采用「**前端直连 Neon (PostgreSQL) 公开读 + EdgeOne Makers 项目内 Edge Functions 代理后台**」架构（默认模式 `neon`），并保留自建 REST API（Node.js + Express + MySQL）作为参考后端模式（`rest`）。整个项目（静态站点 + 后台函数）作为**单个 EdgeOne Makers 项目**构建与部署。
+基于 Vue 3 + Vite + TypeScript + Pinia 的纯前端 SPA 网址导航站。数据层采用「**公开读经 EdgeOne 边缘快照缓存（Blob 优先、命中零回源 Neon）+ 点击统计边缘批量写入 + EdgeOne Makers 项目内 Edge Functions 代理后台**」架构（默认模式 `neon`），并保留自建 REST API（Node.js + Express + MySQL）作为参考后端模式（`rest`）。整个项目（静态站点 + 后台函数）作为**单个 EdgeOne Makers 项目**构建与部署。
 
 ## 技术栈
 
@@ -105,9 +105,9 @@ npm run build
 2. 在 [Makers 控制台](https://console.cloud.tencent.com/edgeone/pages) 创建项目（或 `edgeone makers create`），将本仓库关联/上传。
 3. 控制台配置**项目环境变量**：
    - 构建变量（内联进前端 bundle）：`VITE_BACKEND=neon`、`VITE_NEON_DATABASE_URL`（nav_read）、`VITE_API_BASE_URL=/api`
-   - 函数变量（仅函数经 `context.env` 读取）：`DATABASE_URL_ADMIN`（nav_admin）、`JWT_SECRET`（≥32 字符随机串）
+   - 函数变量（仅函数经 `context.env` 读取）：`DATABASE_URL_ADMIN`（nav_admin）、`JWT_SECRET`（≥32 字符随机串）；可选调优项 `SNAPSHOT_*` / `CLICK_*`（见环境变量说明表，不配则用默认值）
 4. 构建：`npm run build`——脚本内置于首步执行 `npm ci` **全新安装依赖**（严格按 `package-lock.json`，杜绝缓存旧依赖），再 `vue-tsc` 类型检查、`vite build`，并自动把 `edge-functions/` 与函数依赖清单复制进 `dist/` 使其自包含。
-5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台）。函数由平台打包：**jose / bcryptjs 同时声明在根 `package.json` 与 `edge-functions/package.json`**（平台以仓库根 `node_modules` 打包函数，子目录不单独安装依赖；这两包未被前端 import，不会进入前端 bundle）。
+5. 部署：`edgeone makers deploy ./dist`（或将 `dist/` 上传到控制台）。函数由平台打包：**jose / @edgeone/pages-blob 同时声明在根 `package.json` 与 `edge-functions/package.json`**（平台以仓库根 `node_modules` 打包函数，子目录不单独安装依赖；这两包未被前端 import，不会进入前端 bundle；esbuild 已将其内联进函数 bundle，无需单独上传）。
 6. 配置要点：输出目录 `dist`、构建命令 `npm run build`、**无需 SPA fallback**（Hash 路由，`#` 后路径由前端处理）。
 
 **本地开发调试（函数 + 前端同源）：** `edgeone makers dev`（默认 8088 端口同时提供函数服务与前端，`VITE_API_BASE_URL=/api` 同域调用，无跨域；`edgeone makers link` 可将控制台环境变量同步到本地）。
@@ -164,12 +164,14 @@ server {
 
 ## Makers Edge Functions 路由（API 说明）
 
-函数路由即文件系统路由：`edge-functions/api/[[default]].js` 承载全部 `/api/**`（`VITE_API_BASE_URL` 默认同域 `/api`）。统一返回体 `{ data }` / `{ message }`；除 `POST /api/auth/login` 外均需 `Authorization: Bearer <JWT>` 验签。
+函数路由即文件系统路由：`edge-functions/api/[[default]].js` 承载全部 `/api/**`（`VITE_API_BASE_URL` 默认同域 `/api`）。统一返回体 `{ data }` / `{ message }`；公开端点 `POST /api/auth/login`、`GET /api/frontend-data`、`POST /api/stats/click` 无需验签，其余均需 `Authorization: Bearer <JWT>`。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/auth/login` | 校验 `config.admin_user` / `admin_pwd`（bcrypt）→ 签发 HS256 JWT（7d） |
-| GET | `/api/links`、`/api/categories`、`/api/search-engines`、`/api/config`、`/api/config/:key` | 后台读（**含隐藏/停用行**，与前台直连的可见行语义不同，勿混用） |
+| GET | `/api/frontend-data` | **公开只读快照**（无鉴权）：优先返回 Blob 快照（命中零回源 Neon），未命中/过期才回源重建；支持 ETag/304、SWR 后台刷新与旧快照降级 |
+| POST | `/api/stats/click` | **公开点击统计**（无鉴权）：边缘函数内存缓冲 + 批量/延迟写入 `click_stats`，避免每次点击直连 Neon |
+| GET | `/api/links`、`/api/categories`、`/api/search-engines`、`/api/config`、`/api/config/:key` | 后台读（**含隐藏/停用行**，与公开快照的可见行语义不同，勿混用） |
 | GET | `/api/apply?status=` | 申请列表（可按状态过滤；不设匿名读） |
 | POST | `/api/links`、`/api/categories`、`/api/search-engines` | 新建（自动计算 sort_order） |
 | PUT | `/api/links/:id`、`/api/categories/:id`、`/api/search-engines/:id`、`/api/config/:key` | 更新（config 为 upsert） |
@@ -178,7 +180,9 @@ server {
 | POST | `/api/apply/:id/approve`、`/api/apply/:id/reject` | 审核通过（单条 CTE 原子：建链接+更新状态）/ 拒绝 |
 | GET | `/api/stats/overview`、`/api/stats/top-links?limit=`、`/api/stats/trend?days=` | 统计（总数/今日/热门 Top N/趋势，缺失日补 0） |
 
-前台直连（nav_read，不经函数）的只读数据：首页分组/链接/搜索引擎/站点配置、收录申请提交、点击统计记录、死链检测所需的公开链接列表。
+> 后台写操作（links/categories/config/search-engines/apply 审核）在数据库修改成功后，函数经 `context.waitUntil` 主动重建并覆盖 Blob 快照，使边缘侧数据及时生效。
+
+公开读（首页分组/链接/搜索引擎/站点配置）统一经 `GET /api/frontend-data` 边缘快照端点，命中零回源；点击统计经 `POST /api/stats/click` 边缘缓冲批量写入。浏览器直连 nav_read 仅剩：收录申请匿名提交、死链检测所需公开链接列表（快照端点故障时亦作为降级兜底）。
 
 ## 项目结构
 
@@ -266,6 +270,14 @@ server {
 |------|------|------|
 | `DATABASE_URL_ADMIN` | neon 模式 | nav_admin 连接串（后台代理执行 SQL 用） |
 | `JWT_SECRET` | neon 模式 | HS256 JWT 密钥（≥32 字符随机串） |
+| `SNAPSHOT_STORE_NAME` | 否 | Blob 命名空间名（默认 `nav-snapshot`，首次调用自动创建） |
+| `SNAPSHOT_TTL_SECONDS` | 否 | 快照新鲜期（默认 600 秒），期内公开读零回源 Neon |
+| `SNAPSHOT_SWR_SECONDS` | 否 | stale-while-revalidate 窗口（默认 300 秒） |
+| `SNAPSHOT_BROWSER_MAX_AGE` | 否 | 浏览器 Cache-Control max-age（默认 60 秒） |
+| `SNAPSHOT_READ_CONSISTENCY` | 否 | Blob 读一致性 `eventual`（默认）\| `strong` |
+| `SNAPSHOT_ALERT_WEBHOOK` | 否 | 可选：重建失败/降级错误上报 URL |
+| `CLICK_BATCH_SIZE` | 否 | 点击缓冲条数阈值（默认 20），达阈值批量落库 |
+| `CLICK_MAX_AGE_SECONDS` | 否 | 点击缓冲时间阈值（默认 10 秒），防尾批滞留 |
 
 ## License
 

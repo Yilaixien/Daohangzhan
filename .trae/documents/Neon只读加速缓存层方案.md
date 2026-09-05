@@ -54,6 +54,10 @@
     ├──────────────────────────────► │ JWT 验签 → nav_admin 执行 SQL    │
     │ ◄── 200 OK（先响应浏览器）      │  成功后 waitUntil(重建快照)      │
     │                                ├──► 重建 → setJSON 覆盖同一快照   │
+点击统计  POST /api/stats/click      │                                 │
+    ├──────────────────────────────► │ 公开无鉴权 → 推入隔离内内存缓冲  │
+    │ ◄── 200 OK（先响应，不落库）    │  达条数/时间阈值 → waitUntil(     │
+    │                                │   批量 INSERT click_stats)       │
 ```
 
 快照只覆盖**公开只读数据**：`config`（剔除 `admin_pwd`）、`categories`（visible）、`links`（visible）、`search_engines`（active）。`apply` 提交、`click_stats`、管理端读（含隐藏行/stats）保持原有实时路径，不缓存。
@@ -146,6 +150,20 @@ X-Snapshot-Age: <age 秒>
 
 - Blob 默认**最终一致（≈秒级，文档保证 60s 内全局可见）**：后台写重建后，边缘读取存在短暂传播窗口。导航站场景可接受（旧数据仅多存活数秒，且 SWR 机制已保证不阻塞）；
 - 如需「写后立即读到最新」（例如强一致需求），设 `SNAPSHOT_READ_CONSISTENCY=strong`（读直达主存储，延迟略增）——默认 `eventual`，保持最快读路径。
+
+### 4.9 点击统计：`POST /api/stats/click`（批量/延迟写入）
+
+浏览器 `stats.recordClick` 不再直连 Neon，改为 POST 到边缘函数入口（公开、无需 JWT），函数内以**模块级内存缓冲**聚合，再批量写入 `click_stats`：
+
+- **缓冲**：每个边缘隔离实例一个数组 `clickBuffer`（条目 `{ link_id, user_agent }`）+ `clickBufferStart` 首条时间戳；
+- **触发刷新（先响应、后落库）**，两个阈值任一满足即 `context.waitUntil(flush())`：
+  - 条数阈值：`CLICK_BATCH_SIZE`（默认 20）——高并发下每 20 次点击才 1 次批量 INSERT；
+  - 时间阈值：`CLICK_MAX_AGE_SECONDS`（默认 10）——距首条缓冲超时，防低流量下尾批滞留；
+  - 响应本身立即返回 `{ data: { buffered: n } }`，不等待落库（点击跳转零阻塞）；
+- **批量 INSERT**：`sql.unsafe` 参数化多行 `INSERT INTO click_stats (link_id, user_agent) VALUES ...`（一条语句写整批；`clicked_at` 用默认 `now()`）；flush 经模块级 `flushChain` Promise 串行化，避免并发写批重叠；
+- **失败处理**：写入失败（Neon 抖动）→ 日志 `click_flush_error` → 批数据**回写缓冲**等待下轮重试；缓冲设上限 `CLICK_BUFFER_CAP=500`（最旧丢弃），防止 DB 长时故障时内存无限增长——与现状「浏览器直连失败即静默丢弃」相比，可靠性反而提升；
+- **数据丢失窗口**：隔离实例回收/发布时，未到阈值的尾批（≤ 19 条）可能丢失，属可接受的分析类误差；控制台日志可对账 `click_flush.count`；
+- **与快照重建解耦**：`stats/click` 是公开写且不改快照数据，`shouldTriggerSnapshotRebuild` 显式排除，不会在每次点击时触发快照重建。
 
 ---
 
@@ -245,13 +263,11 @@ function refreshSnapshot(env) {
   return task
 }
 
-function snapshotHeaders(etag, status, age, degraded) {
-  const env = process.env // 仅本地；线上由调用方注入，见 serveFrontendData
-  const swr = 300
+function snapshotHeaders(etag, status, age, degraded, browserMaxAge, swr) {
   return {
     ...CORS_HEADERS,
     ETag: etag || '',
-    'Cache-Control': `public, max-age=${60}, s-maxage=0, stale-while-revalidate=${swr}`,
+    'Cache-Control': `public, max-age=${browserMaxAge}, s-maxage=0, stale-while-revalidate=${swr}`,
     'X-Snapshot-Status': status,
     'X-Snapshot-Age': String(age),
     ...(degraded ? { 'X-Snapshot-Degraded': 'true' } : {}),
@@ -328,8 +344,6 @@ function reportError(env, event, error) {
 }
 ```
 
-> `snapshotHeaders` 内对 `browserMaxAge/swr` 以参数传入（上面代码为展示简洁将默认值内联，最终实现以参数化版本为准：`snapshotHeaders(etag, status, age, degraded, browserMaxAge, swr)`，`Cache-Control: public, max-age=${browserMaxAge}, s-maxage=0, stale-while-revalidate=${swr}`）。
-
 **(d) 路由接入 + 后台写触发重建**
 
 - `handleApi` 增加 `env, ctx` 参数；在 `login` 分支之后、JWT 验签**之前**插入公开读路由：
@@ -349,8 +363,8 @@ function shouldTriggerSnapshotRebuild(url, request) {
   if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return false
   const path = url.pathname.replace(/\/+$/, '')
   if (path.endsWith('/auth/login')) return false
-  // 匿名提交收录申请不改变公开快照（apply 不在快照内）
-  if (request.method === 'POST' && path.endsWith('/apply')) return false
+  // 匿名提交收录申请与点击统计不改变公开快照（不在快照内）
+  if (request.method === 'POST' && (path.endsWith('/apply') || path.endsWith('/stats/click'))) return false
   return true
 }
 
@@ -393,6 +407,85 @@ export default function onRequest(context) {
 }
 ```
 
+- 路由接入（`handleApi` 增加 `env, ctx` 参数；`login` 分支之后、JWT 验签**之前**插入两条公开路由）：
+
+```js
+// GET /api/frontend-data（公开只读快照，无需验签）
+if (segments[0] === 'frontend-data' && segments.length === 1 && request.method === 'GET') {
+  return serveFrontendData(request, env, ctx)
+}
+// POST /api/stats/click（公开点击统计：内存缓冲 + 批量/延迟写入，无需验签）
+if (segments[0] === 'stats' && segments[1] === 'click' && request.method === 'POST') {
+  return handleClickStat(env, ctx, body)
+}
+```
+
+**(e) 点击统计：内存缓冲 + 批量/延迟写入（公开路由）**
+
+```js
+// ---------- 点击统计（批量/延迟写入，避免每次点击直连 Neon） ----------
+const CLICK_BATCH_SIZE_DEFAULT = 20      // 条数阈值
+const CLICK_MAX_AGE_MS_DEFAULT = 10_000  // 时间阈值（毫秒）
+const CLICK_BUFFER_CAP = 500             // 缓冲上限（防 DB 故障时内存无限增长）
+const clickBuffer = []                   // { link_id, user_agent }
+let clickBufferStart = 0                 // 首条缓冲时间戳（毫秒）
+let flushChain = Promise.resolve()       // 批量写串行化，防并发重叠
+
+function scheduleClickFlush(env, ctx) {
+  if (clickBuffer.length === 0) return
+  const batchSize = Math.max(1, Number(env?.CLICK_BATCH_SIZE) || CLICK_BATCH_SIZE_DEFAULT)
+  const maxAgeMs = Math.max(1, Number(env?.CLICK_MAX_AGE_SECONDS) || CLICK_MAX_AGE_MS_DEFAULT / 1000) * 1000
+  const due = clickBuffer.length >= batchSize || Date.now() - clickBufferStart >= maxAgeMs
+  if (!due) return
+  const task = flushClicks(env)
+  try {
+    if (ctx?.waitUntil) ctx.waitUntil(task)
+    else task.catch(() => {})
+  } catch {
+    task.catch(() => {})
+  }
+}
+
+// 整批取出 → 参数化多行 INSERT（一条语句写整批）；失败回写缓冲重试
+function flushClicks(env) {
+  const batch = clickBuffer.splice(0, clickBuffer.length)
+  clickBufferStart = 0
+  if (batch.length === 0) return flushChain
+  flushChain = flushChain.then(async () => {
+    try {
+      const sql = getSql(env)
+      const params = []
+      const values = []
+      for (const c of batch) {
+        params.push(c.link_id, c.user_agent)
+        values.push(`($${params.length - 1}, $${params.length})`)
+      }
+      await sql.unsafe(`INSERT INTO click_stats (link_id, user_agent) VALUES ${values.join(', ')}`, params)
+      console.log(JSON.stringify({ event: 'click_flush', count: batch.length }))
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'click_flush_error', count: batch.length, error: String(error?.message || error) }))
+      const overflow = Math.max(0, clickBuffer.length + batch.length - CLICK_BUFFER_CAP)
+      const retry = overflow > 0 ? batch.slice(0, batch.length - overflow) : batch
+      clickBuffer.unshift(...retry)
+      if (clickBuffer.length > 0) clickBufferStart = clickBufferStart || Date.now()
+    }
+  })
+  return flushChain
+}
+
+async function handleClickStat(env, ctx, body) {
+  const linkId = body?.link_id
+  if (typeof linkId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(linkId)) {
+    return fail('link_id 无效', 400)
+  }
+  if (clickBuffer.length >= CLICK_BUFFER_CAP) clickBuffer.shift() // 丢弃最旧，防无限增长
+  if (clickBuffer.length === 0) clickBufferStart = Date.now()
+  clickBuffer.push({ link_id: linkId, user_agent: typeof body?.user_agent === 'string' ? body.user_agent.slice(0, 500) : null })
+  scheduleClickFlush(env, ctx)
+  return ok({ buffered: clickBuffer.length }) // 先响应，落库在 waitUntil 后台完成
+}
+```
+
 ### 5.2 依赖声明
 
 - `edge-functions/package.json`：`dependencies` 增加 `"@edgeone/pages-blob": "^0.0.16"`；
@@ -417,7 +510,7 @@ export interface IFrontendDataService {
 // Services 接口增加: frontendData: IFrontendDataService
 ```
 
-- `src/services/neon/index.ts`：实现 `frontendData.getAll()`——先请求 `/frontend-data`（`apiFetch`），失败则降级直连 nav_read 组装同结构（保留现有 `readSql` 四段查询，正常路径不触发）：
+- `src/services/neon/index.ts`：实现 `frontendData.getAll()`——先请求 `/frontend-data`（`apiFetch`），失败则降级直连 nav_read 组装同结构（保留现有 `readSql` 四段查询，正常路径不触发）；`stats.recordClick` 由直连 INSERT 改为 POST 边缘入口：
 
 ```ts
 frontendData: {
@@ -442,7 +535,19 @@ frontendData: {
       }
     }
   },
-}
+},
+// ... stats 服务内：
+async recordClick(linkId) {
+  // 边缘函数缓冲批量写入（避免每次点击直连 Neon）；失败仅告警，不影响跳转
+  try {
+    await apiFetch<void>('/stats/click', {
+      method: 'POST',
+      body: JSON.stringify({ link_id: linkId, user_agent: navigator.userAgent.substring(0, 500) }),
+    })
+  } catch (error) {
+    console.error('Failed to record click:', error)
+  }
+},
 ```
 
 - `src/services/rest/index.ts`：实现 `frontendData.getAll()`——按现有语义组合（`/config`、`/categories`、`/search-engines`、按分组 `links.getByCategory`），保持 rest 模式可用（参考后端，不新增服务端路由）。
@@ -490,9 +595,12 @@ async function fetchData() {
 # SNAPSHOT_BROWSER_MAX_AGE=60             # 浏览器 Cache-Control max-age（秒）
 # SNAPSHOT_READ_CONSISTENCY=eventual      # Blob 读一致性：eventual|strong
 # SNAPSHOT_ALERT_WEBHOOK=                 # 可选：重建失败/降级错误上报 URL
+# 点击统计缓冲（边缘函数读取）
+# CLICK_BATCH_SIZE=20                     # 条数阈值，达阈值批量落库一次
+# CLICK_MAX_AGE_SECONDS=10                # 时间阈值（距首条缓冲），防尾批滞留
 ```
 
-- `README.md`：API 表增加 `GET /api/frontend-data` 行（公开只读快照端点，含 ETag/304）；「Makers 项目环境变量」表增加上述 6 项；数据层一句话更新（前台公开读经边缘快照，命中零回源）。
+- `README.md`：API 表增加 `GET /api/frontend-data` 行（公开只读快照端点，含 ETag/304）与 `POST /api/stats/click` 行（公开点击统计，边缘缓冲批量写入）；「Makers 项目环境变量」表增加上述 8 项；数据层说明更新（前台公开读经边缘快照命中零回源、点击统计经边缘缓冲批量落库）。
 
 ---
 
@@ -506,6 +614,8 @@ async function fetchData() {
 | `SNAPSHOT_BROWSER_MAX_AGE` | `60` | 浏览器缓存秒数（之后带 ETag 重验证） |
 | `SNAPSHOT_READ_CONSISTENCY` | `eventual` | `eventual`（最快）/ `strong`（写后立即可读，延迟略增） |
 | `SNAPSHOT_ALERT_WEBHOOK` | 空 | 可选：错误上报 URL（重建失败/降级时 POST JSON） |
+| `CLICK_BATCH_SIZE` | `20` | 点击缓冲条数阈值，达阈值批量落库一次 |
+| `CLICK_MAX_AGE_SECONDS` | `10` | 点击缓冲时间阈值（距首条），防尾批滞留 |
 
 ---
 
@@ -516,10 +626,11 @@ async function fetchData() {
 3. **并发去重范围为同一边缘隔离实例**（模块级 Promise 共享）；跨节点不做分布式锁，靠 TTL+SWR 收敛，偶发重复重建成本低（4 条并行查询）。
 4. **ETag 直接复用 `version`**（重建毫秒时间戳），简单单调、天然随写更新；不引入内容哈希。
 5. **`getRuntime` 拆分**为 `getSql`/`getSecret`：公开读端点不依赖 `JWT_SECRET`，行为向后兼容（`getRuntime` 仍同时要求两者）。
-6. **写触发收口在 `handleRequest`**：任意非 GET/HEAD/OPTIONS、非 login、非匿名 apply 提交的 2xx 响应后 `waitUntil` 重建——一处实现覆盖所有写路由，避免在各分支重复埋点。
-7. **前端保留直连兜底**：`frontendData.getAll()` 失败时降级 nav_read 组装，保证边缘故障时首页仍可用。
-8. **平台缓存规则**：`/api/frontend-data` 建议在 EdgeOne 站点缓存规则中配置「不缓存」，使过期/写后刷新由函数层独占控制（`s-maxage=0` 亦兜底）。
-9. 生产 `VITE_NEON_DATABASE_URL`（nav_read）仍保留：供 apply 提交、click_stats、死链检测与快照降级兜底使用，不删除。
+6. **写触发收口在 `handleRequest`**：任意非 GET/HEAD/OPTIONS、非 login、非匿名 apply 提交、非 stats/click 的 2xx 响应后 `waitUntil` 重建——一处实现覆盖所有写路由，避免在各分支重复埋点。
+7. **点击统计缓冲按边缘隔离实例**：各节点独立缓冲/落库（无跨节点聚合）；尾批在实例回收时最多丢 ≤(BATCH-1) 条，写入失败回写缓冲重试（上限 500 条，最旧丢弃）。对分析类统计可接受，并保留「直连失败静默丢弃」原语义的可靠性。
+8. **前端保留直连兜底**：`frontendData.getAll()` 失败时降级 nav_read 组装，保证边缘故障时首页仍可用。
+9. **平台缓存规则**：`/api/frontend-data` 建议在 EdgeOne 站点缓存规则中配置「不缓存」，使过期/写后刷新由函数层独占控制（`s-maxage=0` 亦兜底）。
+10. 生产 `VITE_NEON_DATABASE_URL`（nav_read）仍保留：供 apply 提交、死链检测与快照降级兜底使用，不删除（click_stats 已不再被浏览器直连）。
 
 ---
 
@@ -533,14 +644,15 @@ async function fetchData() {
    - 登录后台 `PUT /api/links/:id` 修改标题 → 等待后 `GET /api/frontend-data` 可见新值（最终一致窗口内可能旧值，属预期）；
    - 把 `SNAPSHOT_TTL_SECONDS=0` 临时验证 SWR 分支：age≥0 → `STALE` + 后台刷新。
 3. **降级验证**：临时改错 `DATABASE_URL_ADMIN` → 有旧快照时返回 `STALE_DEGRADED`（200）；清空快照（`store.delete` 或换 store 名）→ `503`。
-4. **日志对账**：EdgeOne 控制台函数日志出现 `snapshot_rebuilt` / `snapshot_serve` 且命中率（FRESH 占比）随流量上升。
-5. **前端回归**：首页/关于/申请收录正常渲染；管理端增删改查正常且数据实时（不受缓存影响）。
+4. **点击统计验证**：`curl -X POST localhost:8088/api/stats/click -d '{"link_id":"<真实UUID>"}'` → 立即返回 `{ data: { buffered: 1 } }`；连发 20 次 → 控制台出现 `click_flush count=20`；`SELECT count(*) FROM click_stats` 增量吻合；非法 link_id → 400。
+5. **日志对账**：EdgeOne 控制台函数日志出现 `snapshot_rebuilt` / `snapshot_serve` / `click_flush` 且命中率（FRESH 占比）随流量上升。
+6. **前端回归**：首页/关于/申请收录正常渲染；管理端增删改查正常且数据实时（不受缓存影响）；点击链接后统计正常累积。
 
 ---
 
 ## 九、部署注意事项
 
-- Makers 控制台新增函数环境变量：`SNAPSHOT_*`（6 项，见上表）；`@edgeone/pages-blob` 随函数 bundle 内联，无需额外配置；
+- Makers 控制台新增函数环境变量：`SNAPSHOT_*`（6 项）与 `CLICK_*`（2 项），见上表；`@edgeone/pages-blob` 随函数 bundle 内联，无需额外配置；
 - 首次访问 `/api/frontend-data` 时平台自动创建 `nav-snapshot` 命名空间（控制台 Blob 页可查看/浏览快照对象，只读）；
 - 站点平台缓存规则对 `/api/frontend-data` 建议「不缓存」，避免 CDN 层固化旧 JSON；
 - 若历史上前台直连量较大，可观察到 Neon 查询量显著下降（首页 N+2 查询 → 0 回源命中）。

@@ -1,20 +1,34 @@
 /**
- * EdgeOne Makers Edge Functions —— 登录 + 后台写代理（"前端直连 + 代理后台"的薄后端）
+ * EdgeOne Makers Edge Functions —— 登录 + 后台写代理 + 公开只读快照缓存 + 点击统计批量写入
  *
  * 路由：本项目作为单个 Makers 项目部署, 本文件位于 edge-functions/api/ 目录,
  *       由平台文件系统路由映射为 <站点>/api/**（多级匹配, [[default]] 兜底）,
  *       前端 VITE_API_BASE_URL 默认采用同域 '/api', 无需跨域。
  *
  * 职责：
- *  - POST /api/auth/login   校验 config.admin_user/admin_pwd(bcrypt) 后签发 HS256 JWT（7d）
- *  - 其余 /api/* 路由        验签(Bearer) 后以 nav_admin 执行 SQL, 返回 { data } / { message }
- *  - PUT /config/admin_pwd  写入时数据库侧 bcrypt 加密；GET 一律脱敏（哈希不出服务器）
+ *  - POST /api/auth/login        校验 config.admin_user/admin_pwd(bcrypt) 后签发 HS256 JWT（7d）
+ *  - GET  /api/frontend-data     公开只读快照（Blob 缓存优先, 零回源；未命中/过期才回源 Neon 重建）
+ *  - POST /api/stats/click       公开点击统计（模块级内存缓冲 + 批量/延迟写入 click_stats）
+ *  - 其余 /api/* 路由             验签(Bearer) 后以 nav_admin 执行 SQL, 返回 { data } / { message }
+ *  - PUT /config/admin_pwd       写入时数据库侧 bcrypt 加密；GET 一律脱敏（哈希不出服务器）
+ *
+ * 只读快照缓存（核心目标：尽量减少对 Neon 的直接查询次数）：
+ *  - 快照存于 Blob（@edgeone/pages-blob），key=frontend-data.json，结构：
+ *      { schema_version, version(重建毫秒时间戳→ETag), generated_at, data:{config,categories,links,search_engines} }
+ *  - 读路径：FRESH(age<TTL) 直接返回零回源 → STALE(TTL≤age<TTL+SWR) 返回旧快照+waitUntil 后台刷新
+ *    → 未命中/超窗 同步重建写回再返回；回源失败用旧快照降级(STALE_DEGRADED)或 503
+ *  - 后台写成功（links/categories/config/search-engines/apply 审核）后 waitUntil 主动重建覆盖同一快照
+ *  - 并发去重：模块级 inflightRebuilds 共享同一 Promise（同隔离实例内只回源一次, 防缓存击穿）
+ *
+ * 点击统计：
+ *  - clickBuffer 内存缓冲 + 条数/时间阈值触发 waitUntil 批量 INSERT；失败回写缓冲（上限 500 条）重试
  *
  * 安全边界：
  *  - DATABASE_URL_ADMIN（nav_admin 连接串）与 JWT_SECRET 只存 Makers 项目环境变量
  *    （函数经 context.env 读取, 不进前端 bundle）
- *  - 后台读 = 不含 is_visible/is_active 过滤（后台需看到隐藏/停用行）, 与前台直连 SQL 语义不同, 勿复用
+ *  - 后台读 = 不含 is_visible/is_active 过滤（后台需看到隐藏/停用行）, 与公开快照语义不同, 勿复用
  *  - JWT 对数据库层仅是会话状态标记（Postgres/RLS 不校验）；本函数每次 jwtVerify 验签
+ *  - 公开快照必须显式过滤 config.admin_pwd（nav_admin 全表可见, 与 nav_read RLS 不同）
  *
  * 环境变量注入：
  *  - 线上: context.env（Makers 平台每次请求新建对象, 不可作缓存键）
@@ -26,6 +40,7 @@
  */
 import { neon } from '@neondatabase/serverless'
 import { SignJWT, jwtVerify } from 'jose'
+import { getStore } from '@edgeone/pages-blob'
 // 注：密码校验已改为数据库侧 pgcrypto.crypt（规避边缘函数 CPU 限制），不再依赖 bcryptjs
 
 const CORS_HEADERS = {
@@ -35,24 +50,65 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
 }
 
+// ---------- 只读快照缓存 ----------
+const SNAPSHOT_STORE_DEFAULT = 'nav-snapshot'
+const SNAPSHOT_KEY = 'frontend-data.json'
+const SNAPSHOT_SCHEMA_VERSION = 1
+// 同一边缘隔离实例内并发重建只回源一次（缓存击穿防护）
+const inflightRebuilds = new Map()
+const blobStoreCache = new Map()
+
+// ---------- 点击统计（批量/延迟写入, 避免每次点击直连 Neon） ----------
+const CLICK_BATCH_SIZE_DEFAULT = 20 // 条数阈值
+const CLICK_MAX_AGE_SECONDS_DEFAULT = 10 // 时间阈值（距首条缓冲）
+const CLICK_BUFFER_CAP = 500 // 缓冲上限（防 DB 长时故障内存无限增长）
+const clickBuffer = [] // { link_id, user_agent }
+let clickBufferStart = 0 // 首条缓冲时间戳（毫秒）
+let flushChain = Promise.resolve() // 批量写串行化, 防并发批重叠
+
 // ---------- 运行时（按值缓存, 全局单例） ----------
-const runtimeCache = new Map()
-function getRuntime(env) {
+const sqlCache = new Map()
+const secretCache = new Map()
+
+function readEnv(env, key) {
   // 兼容 Makers context.env（线上）与本地 Node 调试（process.env）。
   // 边缘运行时无 process 全局，必须先 typeof 保护，否则直接 ReferenceError
-  const read = (key) => env?.[key] || (typeof process !== 'undefined' ? process.env?.[key] : undefined)
-  const dbUrl = read('DATABASE_URL_ADMIN')
-  const jwtSecret = read('JWT_SECRET')
-  const cacheKey = `${dbUrl}::${jwtSecret}`
-  if (!runtimeCache.has(cacheKey)) {
-    if (!dbUrl || !jwtSecret) throw new Error('缺少环境变量 DATABASE_URL_ADMIN / JWT_SECRET')
+  return env?.[key] || (typeof process !== 'undefined' ? process.env?.[key] : undefined)
+}
+
+function getSql(env) {
+  const dbUrl = readEnv(env, 'DATABASE_URL_ADMIN')
+  if (!dbUrl) throw new Error('缺少环境变量 DATABASE_URL_ADMIN')
+  const cacheKey = `sql::${dbUrl}`
+  if (!sqlCache.has(cacheKey)) {
     // neon() 返回连接池 → 必须全局单例, 按 cacheKey 只创建一次
-    runtimeCache.set(cacheKey, {
-      sql: neon(dbUrl),
-      secret: new TextEncoder().encode(jwtSecret),
-    })
+    sqlCache.set(cacheKey, neon(dbUrl))
   }
-  return runtimeCache.get(cacheKey)
+  return sqlCache.get(cacheKey)
+}
+
+function getSecret(env) {
+  const jwtSecret = readEnv(env, 'JWT_SECRET')
+  if (!jwtSecret) throw new Error('缺少环境变量 JWT_SECRET')
+  const cacheKey = `secret::${jwtSecret}`
+  if (!secretCache.has(cacheKey)) {
+    secretCache.set(cacheKey, new TextEncoder().encode(jwtSecret))
+  }
+  return secretCache.get(cacheKey)
+}
+
+function getRuntime(env) {
+  return { sql: getSql(env), secret: getSecret(env) }
+}
+
+function getSnapshotStore(env) {
+  const name = readEnv(env, 'SNAPSHOT_STORE_NAME') || SNAPSHOT_STORE_DEFAULT
+  const consistency = readEnv(env, 'SNAPSHOT_READ_CONSISTENCY') === 'strong' ? 'strong' : 'eventual'
+  const cacheKey = `${name}::${consistency}`
+  if (!blobStoreCache.has(cacheKey)) {
+    blobStoreCache.set(cacheKey, getStore({ name, consistency }))
+  }
+  return blobStoreCache.get(cacheKey)
 }
 
 function ok(data, status = 200) {
@@ -73,6 +129,186 @@ async function verifyToken(request, rt) {
   } catch {
     return null
   }
+}
+
+// ---------- 只读快照：重建 / 去重 / 响应 ----------
+// 重建快照：4 表并行查询（nav_admin）→ setJSON 写回 Blob
+async function rebuildSnapshot(env) {
+  const sql = getSql(env)
+  const started = Date.now()
+  const [configRows, categories, links, engines] = await Promise.all([
+    sql`SELECT key, value FROM config WHERE key <> 'admin_pwd'`,
+    sql`SELECT * FROM categories WHERE is_visible = true ORDER BY sort_order`,
+    sql`SELECT * FROM links WHERE is_visible = true ORDER BY sort_order`,
+    sql`SELECT * FROM search_engines WHERE is_active = true ORDER BY sort_order`,
+  ])
+  const config = {}
+  for (const r of configRows) config[r.key] = r.value
+  const snapshot = {
+    schema_version: SNAPSHOT_SCHEMA_VERSION,
+    version: String(started),
+    generated_at: new Date(started).toISOString(),
+    data: { config, categories, links, search_engines: engines },
+  }
+  await getSnapshotStore(env).setJSON(SNAPSHOT_KEY, snapshot)
+  console.log(JSON.stringify({
+    event: 'snapshot_rebuilt', key: SNAPSHOT_KEY,
+    rows: { categories: categories.length, links: links.length, engines: engines.length },
+    latency_ms: Date.now() - started,
+  }))
+  return snapshot
+}
+
+// 并发去重：同一隔离内进行中的重建共享同一 Promise；结束后删除以便重试
+function refreshSnapshot(env) {
+  const existing = inflightRebuilds.get(SNAPSHOT_KEY)
+  if (existing) return existing
+  const task = rebuildSnapshot(env).finally(() => inflightRebuilds.delete(SNAPSHOT_KEY))
+  inflightRebuilds.set(SNAPSHOT_KEY, task)
+  return task
+}
+
+function snapshotHeaders(etag, status, age, degraded, browserMaxAge, swr) {
+  return {
+    ...CORS_HEADERS,
+    ETag: etag || '',
+    'Cache-Control': `public, max-age=${browserMaxAge}, s-maxage=0, stale-while-revalidate=${swr}`,
+    'X-Snapshot-Status': status,
+    'X-Snapshot-Age': String(age),
+    ...(degraded ? { 'X-Snapshot-Degraded': 'true' } : {}),
+  }
+}
+
+function snapshotResponse(snap, etag, status, age, degraded, browserMaxAge, swr) {
+  const headers = snapshotHeaders(etag, status, age, degraded, browserMaxAge, swr)
+  const started = Date.now()
+  console.log(JSON.stringify({ event: 'snapshot_serve', status, age_s: age, latency_ms: Date.now() - started }))
+  return new Response(
+    JSON.stringify({ data: snap.data, version: snap.version, generated_at: snap.generated_at }),
+    { status: 200, headers },
+  )
+}
+
+// 可选错误上报：重建失败/降级时 POST 到 webhook（默认关闭）
+function reportError(env, event, error) {
+  const url = readEnv(env, 'SNAPSHOT_ALERT_WEBHOOK')
+  if (!url) return
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event, error: String(error?.message || error), ts: Date.now() }),
+  }).catch(() => {})
+}
+
+// 公开只读端点：快照优先 → SWR → 同步重建 → 旧快照降级
+async function serveFrontendData(request, env, ctx) {
+  const store = getSnapshotStore(env)
+  const ttl = Math.max(0, Number(readEnv(env, 'SNAPSHOT_TTL_SECONDS')) || 600)
+  const swr = Math.max(0, Number(readEnv(env, 'SNAPSHOT_SWR_SECONDS')) || 300)
+  const browserMaxAge = Math.max(0, Number(readEnv(env, 'SNAPSHOT_BROWSER_MAX_AGE')) || 60)
+  const nowMs = Date.now()
+
+  let snap = null
+  try {
+    snap = await store.get(SNAPSHOT_KEY, { type: 'json' })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'snapshot_read_error', error: String(error?.message || error) }))
+  }
+
+  const age = snap?.generated_at ? Math.max(0, Math.floor((nowMs - Date.parse(snap.generated_at)) / 1000)) : Infinity
+  const etag = snap?.version ? `"${snap.version}"` : null
+
+  // ETag 协商：浏览器/CDN 携 If-None-Match 时 304（省带宽；写后重建 version 变化 → 自动拿到新数据）
+  if (etag && request.headers.get('If-None-Match') === etag) {
+    return new Response(null, { status: 304, headers: snapshotHeaders(etag, 'FRESH', age, false, browserMaxAge, swr) })
+  }
+
+  if (snap && age < ttl) {
+    return snapshotResponse(snap, etag, 'FRESH', age, false, browserMaxAge, swr)
+  }
+  if (snap && age < ttl + swr) {
+    // stale-while-revalidate：先回旧快照，后台异步重建，用户无感
+    try {
+      if (ctx?.waitUntil) ctx.waitUntil(refreshSnapshot(env).catch(() => {}))
+      else refreshSnapshot(env).catch(() => {})
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'snapshot_swr_trigger_error', error: String(error?.message || error) }))
+    }
+    return snapshotResponse(snap, etag, 'STALE', age, false, browserMaxAge, swr)
+  }
+
+  // 未命中 / 超 SWR 窗口 → 同步回源重建
+  try {
+    const rebuilt = await refreshSnapshot(env)
+    return snapshotResponse(rebuilt, `"${rebuilt.version}"`, 'REBUILT', 0, false, browserMaxAge, swr)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'snapshot_rebuild_error', error: String(error?.message || error) }))
+    reportError(env, 'snapshot_rebuild_error', error)
+    if (snap) {
+      // 回源失败：用旧快照降级（即使已严重过期），保证可用性
+      return snapshotResponse(snap, etag, 'STALE_DEGRADED', age, true, browserMaxAge, swr)
+    }
+    return fail('数据暂时不可用，请稍后重试', 503)
+  }
+}
+
+// ---------- 点击统计：缓冲 + 批量/延迟写入 ----------
+function scheduleClickFlush(env, ctx) {
+  if (clickBuffer.length === 0) return
+  const batchSize = Math.max(1, Number(readEnv(env, 'CLICK_BATCH_SIZE')) || CLICK_BATCH_SIZE_DEFAULT)
+  const maxAgeMs = Math.max(1, Number(readEnv(env, 'CLICK_MAX_AGE_SECONDS')) || CLICK_MAX_AGE_SECONDS_DEFAULT) * 1000
+  const due = clickBuffer.length >= batchSize || Date.now() - clickBufferStart >= maxAgeMs
+  if (!due) return
+  const task = flushClicks(env)
+  try {
+    if (ctx?.waitUntil) ctx.waitUntil(task)
+    else task.catch(() => {})
+  } catch {
+    task.catch(() => {})
+  }
+}
+
+// 整批取出 → 参数化多行 INSERT（一条语句写整批）；失败回写缓冲等待下轮重试
+function flushClicks(env) {
+  const batch = clickBuffer.splice(0, clickBuffer.length)
+  clickBufferStart = 0
+  if (batch.length === 0) return flushChain
+  flushChain = flushChain.then(async () => {
+    try {
+      const sql = getSql(env)
+      const params = []
+      const values = []
+      for (const c of batch) {
+        params.push(c.link_id, c.user_agent)
+        values.push(`($${params.length - 1}, $${params.length})`)
+      }
+      await sql.unsafe(`INSERT INTO click_stats (link_id, user_agent) VALUES ${values.join(', ')}`, params)
+      console.log(JSON.stringify({ event: 'click_flush', count: batch.length }))
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'click_flush_error', count: batch.length, error: String(error?.message || error) }))
+      // 失败回写缓冲（受 CLICK_BUFFER_CAP 上限保护），等待下轮触发重试
+      const overflow = Math.max(0, clickBuffer.length + batch.length - CLICK_BUFFER_CAP)
+      const retry = overflow > 0 ? batch.slice(0, batch.length - overflow) : batch
+      clickBuffer.unshift(...retry)
+      if (clickBuffer.length > 0) clickBufferStart = clickBufferStart || Date.now()
+    }
+  })
+  return flushChain
+}
+
+async function handleClickStat(env, ctx, body) {
+  const linkId = body?.link_id
+  if (typeof linkId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(linkId)) {
+    return fail('link_id 无效', 400)
+  }
+  if (clickBuffer.length >= CLICK_BUFFER_CAP) clickBuffer.shift() // 丢弃最旧，防无限增长
+  if (clickBuffer.length === 0) clickBufferStart = Date.now()
+  clickBuffer.push({
+    link_id: linkId,
+    user_agent: typeof body?.user_agent === 'string' ? body.user_agent.slice(0, 500) : null,
+  })
+  scheduleClickFlush(env, ctx)
+  return ok({ buffered: clickBuffer.length }) // 先响应，落库在 waitUntil 后台完成
 }
 
 // ---------- 登录 ----------
@@ -108,14 +344,24 @@ async function login(request, rt, body) {
 }
 
 // ---------- 后台读写路由 ----------
-// 语义须知：后台读均不加 is_visible/is_active 过滤（需含隐藏/停用行）, 勿与前台直连 SQL 混用
-async function handleApi(url, request, body, rt) {
+// 语义须知：后台读均不加 is_visible/is_active 过滤（需含隐藏/停用行）, 勿与公开快照 SQL 混用
+async function handleApi(url, request, body, rt, env, ctx) {
   const { sql } = rt
   const segments = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean)
 
   // POST /api/auth/login（无需验签）
   if (url.pathname.replace(/\/+$/, '').endsWith('/auth/login') && request.method === 'POST') {
     return login(request, rt, body)
+  }
+
+  // GET /api/frontend-data（公开只读快照, 无需验签）
+  if (segments[0] === 'frontend-data' && segments.length === 1 && request.method === 'GET') {
+    return serveFrontendData(request, env, ctx)
+  }
+
+  // POST /api/stats/click（公开点击统计：内存缓冲 + 批量/延迟写入, 无需验签）
+  if (segments[0] === 'stats' && segments[1] === 'click' && request.method === 'POST') {
+    return handleClickStat(env, ctx, body)
   }
 
   // 其余一律验签
@@ -369,13 +615,36 @@ async function updateByWhitelist(table, idCol, id, body, allowedFields, rt) {
   return rows[0]
 }
 
+// ---------- 后台写成功后触发快照重建（收口一处, 覆盖所有写路由） ----------
+function shouldTriggerSnapshotRebuild(url, request) {
+  if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return false
+  const path = url.pathname.replace(/\/+$/, '')
+  if (path.endsWith('/auth/login')) return false
+  // 匿名提交收录申请与点击统计不改变公开快照（不在快照内）
+  if (request.method === 'POST' && (path.endsWith('/apply') || path.endsWith('/stats/click'))) return false
+  return true
+}
+
+function afterDataWrite(env, ctx) {
+  const task = refreshSnapshot(env).catch((error) =>
+    console.error(JSON.stringify({ event: 'snapshot_rebuild_after_write_error', error: String(error?.message || error) })),
+  )
+  try {
+    if (ctx?.waitUntil) ctx.waitUntil(task)
+    else task.catch(() => {})
+  } catch {
+    task.catch(() => {})
+  }
+}
+
 // ---------- 入口（Makers 约定） ----------
 /**
  * Makers Edge Functions 入口: export default onRequest(context)
  * context.request = 标准 Request; context.env = Makers 环境变量（每次请求为新对象, 不可作缓存键）
+ * context.waitUntil = 后台任务（SWR 刷新 / 点击批量落库 / 写后重建）
  * 本文件路径 edge-functions/api/[[default]].js → 站点 /api/** 全部由此分发
  */
-export async function handleRequest(request, env) {
+export async function handleRequest(request, env, ctx) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS })
   }
@@ -389,7 +658,12 @@ export async function handleRequest(request, env) {
   const url = new URL(request.url)
   const body = request.method === 'GET' || request.method === 'DELETE' ? null : await request.json().catch(() => ({}))
   try {
-    return await handleApi(url, request, body, rt)
+    const res = await handleApi(url, request, body, rt, env, ctx)
+    // 数据写成功后主动重建并覆盖同一快照，使边缘侧数据及时生效（先响应写请求）
+    if (res.status >= 200 && res.status < 300 && shouldTriggerSnapshotRebuild(url, request)) {
+      afterDataWrite(env, ctx)
+    }
+    return res
   } catch (error) {
     console.error(error)
     return fail(error?.message || 'Internal Server Error', 500)
@@ -397,5 +671,5 @@ export async function handleRequest(request, env) {
 }
 
 export default function onRequest(context) {
-  return handleRequest(context.request, context.env)
+  return handleRequest(context.request, context.env, context)
 }

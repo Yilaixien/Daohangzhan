@@ -222,5 +222,22 @@ export function createServices(): Services {
         })
       },
     },
+
+    frontendData: {
+      // 组合现有 REST 接口，保持与原调用模式一致（参考后端，无边缘快照缓存）
+      async getAll() {
+        const [config, categories, search_engines] = await Promise.all([
+          request<Record<string, string>>('/config'),
+          request<Category[]>('/categories'),
+          request<SearchEngine[]>('/search-engines'),
+        ])
+        const links: Link[] = []
+        for (const cat of categories) {
+          const catLinks = await request<Link[]>(`/links?category_id=${cat.id}`)
+          links.push(...catLinks)
+        }
+        return { config, categories, links, search_engines }
+      },
+    },
   }
 }

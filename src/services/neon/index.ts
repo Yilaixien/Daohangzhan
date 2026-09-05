@@ -1,14 +1,18 @@
 import { neon } from '@neondatabase/serverless'
-import type { Services, Link, Category, Apply, SearchEngine, StatsOverview } from '../contracts'
+import type { Services, Link, Category, Apply, SearchEngine, StatsOverview, FrontendData } from '../contracts'
 
 // ============================================================
-// Neon（PostgreSQL）服务实现 —— 前端直连公开读 + EdgeOne Makers 函数代理后台
+// Neon（PostgreSQL）服务实现 —— 公开快照读（边缘函数）+ 直连兜底 + EdgeOne Makers 函数代理后台
 //
 // 数据源分工：
-//  - 公开读写：浏览器直连 Neon HTTP /sql（角色 nav_read，RLS 强制行级过滤）。
-//    见 database/neon_schema.sql 的 rd_* 策略。
+//  - 公开只读（首页/关于/申请收录/前台布局）：统一走 Makers 边缘函数 GET /api/frontend-data
+//    —— 函数优先返回 Blob 快照（命中零回源 Neon），未命中/过期才回源重建；本实现仅在
+//    边缘端点不可用时降级直连 nav_read 组装同结构数据（正常路径不触发）。
+//  - 点击统计：POST /api/stats/click（边缘函数内存缓冲 + 批量/延迟写入 click_stats），
+//    不再由浏览器直连 Neon。
+//  - 公开写：收录申请提交仍由浏览器直连 nav_read（RLS 仅允许 INSERT）。
 //  - 后台读写：一律走 Makers 项目内 Edge Functions（edge-functions/api/**，
-//    函数内以 nav_admin 执行，后台读含隐藏/停用行 —— 与该实现的前台直连 SQL
+//    函数内以 nav_admin 执行，后台读含隐藏/停用行 —— 与该实现的直连 SQL
 //    语义不同，勿互相复用）。函数随 Makers 单项目部署，同域路由，默认 /api。
 //  - JWT 定位：自签 JWT 仅是"会话状态标记"（localStorage 路由守卫 + 函数 API 的
 //    Bearer 头）；Postgres/RLS 不校验它。密钥只存在于 Makers 项目环境变量。
@@ -344,11 +348,41 @@ export function createServices(): Services {
       },
 
       async recordClick(linkId) {
-        // 公开写（nav_read；失败仅告警，不影响跳转）
+        // 边缘函数缓冲批量写入（避免每次点击直连 Neon）；失败仅告警，不影响跳转
         try {
-          await readSql`INSERT INTO click_stats (link_id, user_agent) VALUES (${linkId}, ${navigator.userAgent.substring(0, 500)})`
+          await apiFetch<void>('/stats/click', {
+            method: 'POST',
+            body: JSON.stringify({ link_id: linkId, user_agent: navigator.userAgent.substring(0, 500) }),
+          })
         } catch (error) {
           console.error('Failed to record click:', error)
+        }
+      },
+    },
+
+    frontendData: {
+      // 公开只读快照：优先边缘函数（命中 Blob 快照零回源）；失败降级直连 nav_read 组装同结构
+      async getAll() {
+        try {
+          return await apiFetch<FrontendData>('/frontend-data')
+        } catch (error) {
+          console.error('frontend-data 快照不可用，降级直连 Neon:', error)
+          const [configRows, categories, links, engines] = await Promise.all([
+            readSql`SELECT key, value FROM config`,
+            readSql`SELECT * FROM categories WHERE is_visible = true ORDER BY sort_order`,
+            readSql`SELECT * FROM links WHERE is_visible = true ORDER BY sort_order`,
+            readSql`SELECT * FROM search_engines WHERE is_active = true ORDER BY sort_order`,
+          ])
+          const config: Record<string, string> = {}
+          for (const row of configRows as unknown as { key: string; value: string | null }[]) {
+            config[row.key] = row.value || ''
+          }
+          return {
+            config,
+            categories: categories as unknown as Category[],
+            links: links as unknown as Link[],
+            search_engines: engines as unknown as SearchEngine[],
+          }
         }
       },
     },
