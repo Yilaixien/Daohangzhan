@@ -120,6 +120,7 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">排序值</label>
             <input v-model="form.sort_order" type="number" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+          <p v-if="errorMsg" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{{ errorMsg }}</p>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" @click="showForm = false" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">取消</button>
             <button type="submit" :disabled="saving" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
@@ -231,6 +232,7 @@ const editingLink = ref<Link | null>(null)
 const deleteTarget = ref<Link | null>(null)
 const batchText = ref('')
 const fetching = ref(false) // 添加链接时自动获取名称/图标中
+const errorMsg = ref('') // 保存失败时的错误提示
 
 // 自动获取 API 地址（来自站点配置，留空回退默认值）
 const fetchTitleApi = ref('https://lianjie.hjke.cn/api/title?url={url}')
@@ -292,12 +294,14 @@ async function loadData() {
 
 function openAdd() {
   editingLink.value = null
+  errorMsg.value = ''
   form.value = { title: '', url: '', category_id: '', icon: '', description: '', sort_order: 10 }
   showForm.value = true
 }
 
 function openEdit(link: Link) {
   editingLink.value = link
+  errorMsg.value = ''
   form.value = {
     title: link.title,
     url: link.url,
@@ -354,29 +358,30 @@ async function autoFetch(force = false) {
 
 async function saveLink() {
   saving.value = true
+  errorMsg.value = ''
   try {
+    // number 输入框的 v-model 绑定的是字符串，清空会得到 ''，
+    // sort_order 不做归一化会原样入库触发 PostgreSQL integer 类型报错
+    const sortOrder = Number(form.value.sort_order)
+    const payload = {
+      title: form.value.title.trim(),
+      url: form.value.url.trim(),
+      category_id: String(form.value.category_id),
+      icon: form.value.icon?.trim() || null,
+      description: form.value.description?.trim() || null,
+      sort_order: Number.isFinite(sortOrder) ? sortOrder : 10,
+    }
     if (editingLink.value) {
-      await services.links.update(editingLink.value.id, {
-        title: form.value.title,
-        url: form.value.url,
-        category_id: form.value.category_id,
-        icon: form.value.icon || null,
-        description: form.value.description || null,
-        sort_order: form.value.sort_order,
-      })
+      await services.links.update(editingLink.value.id, payload)
     } else {
-      await services.links.create({
-        title: form.value.title,
-        url: form.value.url,
-        category_id: form.value.category_id,
-        icon: form.value.icon || null,
-        description: form.value.description || null,
-        sort_order: form.value.sort_order,
-      })
+      await services.links.create(payload)
     }
     showForm.value = false
     await loadData()
-  } catch {} finally {
+  } catch (error) {
+    console.error('保存链接失败:', error)
+    errorMsg.value = (error as Error)?.message || '保存失败，请稍后重试'
+  } finally {
     saving.value = false
   }
 }
