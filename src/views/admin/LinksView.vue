@@ -309,9 +309,9 @@ function openEdit(link: Link) {
   showForm.value = true
 }
 
-// 输入链接后自动获取名称与图标（仅添加模式生效；force 为 true 时强制覆盖已填名称）
+// 输入链接后自动获取名称与图标（添加/编辑均生效；点击按钮 force=true 强制覆盖名称与图标，blur force=false 仅在名称/图标为空时填充）
 async function autoFetch(force = false) {
-  if (editingLink.value || fetching.value) return
+  if (fetching.value) return
   let raw = form.value.url.trim()
   if (!raw) return
   if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
@@ -325,10 +325,12 @@ async function autoFetch(force = false) {
     return // URL 非法时静默放弃
   }
 
-  // 1. 立即填充图标 URL（站点配置的 API 模板，纯前端拼串，无需网络检查）
-  form.value.icon = fetchIconApi.value
-    .replace(/\{hostname\}/g, hostname)
-    .replace(/\{url\}/g, encodeURIComponent(raw))
+  // 1. 立即填充图标 URL（未填图标时填充；force 时强制刷新，站点配置的 API 模板，纯前端拼串，无需网络检查）
+  if (!form.value.icon || force) {
+    form.value.icon = fetchIconApi.value
+      .replace(/\{hostname\}/g, hostname)
+      .replace(/\{url\}/g, encodeURIComponent(raw))
+  }
 
   fetching.value = true
   try {
