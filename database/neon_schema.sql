@@ -17,6 +17,9 @@
 -- 启用 UUID 扩展
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- 启用 pgcrypto（crypt/gen_salt：管理员密码 bcrypt 加密与登录校验）
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- ============================================
 -- 1. categories 表（分组）
 -- ============================================
