@@ -323,6 +323,15 @@ async function login(request, rt, body) {
   const rows = await sql`SELECT key, value FROM config WHERE key IN ('admin_user','admin_pwd')`
   const cfg = {}
   for (const r of rows) cfg[r.key] = r.value
+  // 无泄露审计日志：仅记录存在性与 hash 前缀，不输出密码/完整 hash，
+  // 便于区分「admin_pwd 缺失/清空」与「密码不匹配/连接权限异常」
+  console.log(JSON.stringify({
+    event: 'login_probe',
+    username_input: username || '',
+    admin_user_present: cfg.admin_user !== undefined,
+    admin_pwd_empty: !cfg.admin_pwd,
+    admin_pwd_prefix: cfg.admin_pwd ? cfg.admin_pwd.slice(0, 4) : '',
+  }))
   const adminUser = cfg.admin_user || 'admin'
   const adminPwdHash = cfg.admin_pwd || ''
   if (username !== adminUser || !adminPwdHash) {
