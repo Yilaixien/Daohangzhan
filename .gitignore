@@ -4,3 +4,7 @@ dist/
 .env.local
 nodejs/
 download-git.cjs
+# 构建产物快照
+*.zip
+# Trae 临时分享导出
+.trae-html-share-packages/
