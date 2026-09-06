@@ -90,7 +90,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">URL *</label>
             <div class="flex gap-2">
-              <input v-model="form.url" type="url" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" @blur="autoFetch()" />
+              <input v-model="form.url" type="url" required class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" @blur="autoFetch(false, 'blur')" />
               <button type="button" @click="autoFetch(true)" :disabled="fetching" class="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors whitespace-nowrap">
                 {{ fetching ? '获取中...' : '自动获取' }}
               </button>
@@ -309,9 +309,11 @@ function openEdit(link: Link) {
   showForm.value = true
 }
 
-// 输入链接后自动获取名称与图标（仅添加模式生效；force 为 true 时强制覆盖已填名称）
-async function autoFetch(force = false) {
-  if (editingLink.value || fetching.value) return
+// 自动获取名称与图标；force 为 true 时强制覆盖已填名称；
+// blur 触发（source='blur'）仅在新增态生效，避免编辑态误覆盖自定义图标
+async function autoFetch(force = false, source: 'blur' | 'click' = 'click') {
+  if (fetching.value) return
+  if (editingLink.value && source === 'blur') return
   let raw = form.value.url.trim()
   if (!raw) return
   if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
