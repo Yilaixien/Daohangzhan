@@ -282,7 +282,7 @@ function flushClicks(env) {
         params.push(c.link_id, c.user_agent)
         values.push(`($${params.length - 1}, $${params.length})`)
       }
-      await sql.unsafe(`INSERT INTO click_stats (link_id, user_agent) VALUES ${values.join(', ')}`, params)
+      await sql.query(`INSERT INTO click_stats (link_id, user_agent) VALUES ${values.join(', ')}`, params)
       console.log(JSON.stringify({ event: 'click_flush', count: batch.length }))
     } catch (error) {
       console.error(JSON.stringify({ event: 'click_flush_error', count: batch.length, error: String(error?.message || error) }))
@@ -619,7 +619,9 @@ async function updateByWhitelist(table, idCol, id, body, allowedFields, rt) {
   }
   params.push(id)
   const query = `UPDATE ${table} SET ${sets.join(', ')}, updated_at = now() WHERE ${idCol} = $${params.length} RETURNING *`
-  const rows = await sql.unsafe(query, params)
+  // 注意：@neondatabase/serverless 中 执行带占位符的原始 SQL 必须用 sql.query(query, params)；
+  // sql.unsafe(rawSql) 只构造可嵌入模板的原始片段对象，不会执行（历史误用导致更新恒返回空、不落库）
+  const rows = await sql.query(query, params)
   return rows[0]
 }
 
